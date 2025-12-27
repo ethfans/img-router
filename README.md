@@ -1,6 +1,6 @@
 # ImgRouter
 
-> 三合一图像生成 API 中转服务 - 一个接口，多渠道图像生成
+> 四合一图像生成 API 中转服务 - 一个接口，多渠道图像生成
 
 [![Deno](https://img.shields.io/badge/Deno-2.x-000000?logo=deno)](https://deno.land/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker)](https://www.docker.com/)
@@ -9,7 +9,7 @@
 ## 特性
 
 - **智能路由** - 根据 API Key 格式自动识别并分发到对应渠道
-- **三渠道支持** - 火山引擎、Gitee (模力方舟)、ModelScope (魔塔)
+- **四渠道支持** - 火山引擎、Gitee (模力方舟)、ModelScope (魔塔)、Hugging Face
 - **OpenAI 兼容** - 完全兼容 `/v1/chat/completions` 接口格式
 - **流式响应** - 支持 SSE 流式输出
 - **图片参考** - 支持上传参考图片进行图生图
@@ -33,12 +33,12 @@
 │  └─────────────┴─────────────────┴─────────────────────┘    │
 └─────────────────────┬───────────────────────────────────────┘
                        │
-           ┌───────────┼───────────┐
-           ▼           ▼           ▼
-     ┌──────────┐ ┌──────────┐ ┌──────────┐
-     │VolcEngine│ │  Gitee   │ │ModelScope│
-     │ (火山)   │ │(模力方舟)│ │  (魔塔)  │
-     └──────────┘ └──────────┘ └──────────┘
+           ┌───────────┼───────────┬───────────┐
+           ▼           ▼           ▼           ▼
+     ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
+     │VolcEngine│ │  Gitee   │ │ModelScope│ │HuggingFac│
+     │ (火山)   │ │(模力方舟)│ │  (魔塔)  │ │ (抱脸)   │
+     └──────────┘ └──────────┘ └──────────┘ └──────────┘
 ```
 
 ## 快速开始
@@ -125,6 +125,7 @@ curl -X POST http://localhost:10001/v1/chat/completions \
 | 火山引擎 | UUID | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` |
 | Gitee | 30-60位字母数字 | `abc123def456...` |
 | ModelScope | `ms-` 开头 | `ms-xxxxxxxxxx` |
+| Hugging Face | `hf_` 开头 | `hf_xxxxxxxxxx` |
 
 系统根据 API Key 格式自动识别渠道，无需手动指定。
 
@@ -144,6 +145,7 @@ curl -X POST http://localhost:10001/v1/chat/completions \
 | 火山引擎 | `doubao-seedream-4-0-250828` |
 | Gitee | `z-image-turbo` |
 | ModelScope | `Tongyi-MAI/Z-Image-Turbo` |
+| Hugging Face | `z-image-turbo` |
 
 ## 响应格式
 

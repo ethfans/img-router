@@ -9,13 +9,13 @@ services:
     environment:
       - PORT=10001  # 服务端口（默认 10001）
     restart: always  # 容器退出时自动重启
-    # 健康检查（可选，确保服务正常运行）
+    # 健康检查（确保服务正常运行）
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:10001/"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:10001/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 15s
     volumes:
       - ./data:/app/data  # 应用数据本地化存储（日志在 ./data/logs）
 

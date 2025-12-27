@@ -1,5 +1,5 @@
-// 三合一图像生成 API 中转服务
-// 支持：火山引擎 (VolcEngine)、Gitee (模力方舟)、ModelScope (魔塔)
+// 四合一图像生成 API 中转服务
+// 支持：火山引擎 (VolcEngine)、Gitee (模力方舟)、ModelScope (魔塔)、Hugging Face
 // 路由策略：根据 API Key 格式自动分发
 
 // ================= 导入日志模块 =================
@@ -34,13 +34,14 @@ import {
   VolcEngineConfig,
   GiteeConfig,
   ModelScopeConfig,
+  HuggingFaceConfig,
   API_TIMEOUT_MS,
   PORT,
 } from "./config.ts";
 
 // ================= 类型定义 =================
 
-type Provider = "VolcEngine" | "Gitee" | "ModelScope" | "Unknown";
+type Provider = "VolcEngine" | "Gitee" | "ModelScope" | "HuggingFace" | "Unknown";
 
 // 消息内容项类型
 interface TextContentItem {
@@ -73,6 +74,12 @@ interface ChatRequest {
 
 function detectProvider(apiKey: string): Provider {
   if (!apiKey) return "Unknown";
+
+  // Hugging Face: hf_xxxx...
+  if (apiKey.startsWith("hf_")) {
+    logProviderRouting("HuggingFace", apiKey.substring(0, 4));
+    return "HuggingFace";
+  }
 
   if (apiKey.startsWith("ms-")) {
     logProviderRouting("ModelScope", apiKey.substring(0, 4));
@@ -405,6 +412,175 @@ async function handleModelScope(
   throw err;
 }
 
+/**
+ * HuggingFace 图片生成处理函数
+ * 支持多 URL 故障转移：当前 URL 失败时自动尝试下一个
+ */
+async function handleHuggingFace(
+  apiKey: string,
+  reqBody: ChatRequest,
+  prompt: string,
+  images: string[],
+  requestId: string
+): Promise<string> {
+  const startTime = Date.now();
+  logApiCallStart("HuggingFace", "generate_image");
+
+  // 记录完整 Prompt
+  logFullPrompt("HuggingFace", requestId, prompt);
+  
+  // 记录输入图片
+  logInputImages("HuggingFace", requestId, images);
+  
+  // 使用配置中的默认模型
+  const model = reqBody.model && HuggingFaceConfig.supportedModels.includes(reqBody.model)
+    ? reqBody.model
+    : HuggingFaceConfig.defaultModel;
+  const size = reqBody.size || "2048x2048";
+  const [width, height] = size.split('x').map(Number);
+  const seed = Math.round(Math.random() * 2147483647);
+  const steps = 9;
+
+  // 记录生成开始
+  logImageGenerationStart("HuggingFace", requestId, model, size, prompt.length);
+
+  if (images.length > 0) {
+    warn("HuggingFace", "Hugging Face 渠道暂不支持多图参考，将忽略输入图片");
+  }
+
+  // 使用 Gradio API 格式
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (apiKey) {
+    headers["Authorization"] = `Bearer ${apiKey}`;
+  }
+
+  // 准备请求体数据
+  const requestBody = JSON.stringify({
+    data: [prompt || "A beautiful scenery", height || 1024, width || 1024, steps, seed, false]
+  });
+
+  // 获取配置中的 URL 资源池（支持故障转移）
+  const apiUrls = HuggingFaceConfig.apiUrls;
+  
+  if (!apiUrls || apiUrls.length === 0) {
+    const err = new Error("HuggingFace 配置错误: 未配置任何 API URL");
+    error("HuggingFace", "API URL 资源池为空");
+    logImageGenerationFailed("HuggingFace", requestId, "配置错误");
+    logApiCallEnd("HuggingFace", "generate_image", false, Date.now() - startTime);
+    throw err;
+  }
+
+  info("HuggingFace", `开始处理请求，URL 资源池大小: ${apiUrls.length}`);
+
+  // 遍历所有 URL，尝试执行请求
+  let lastError: Error | null = null;
+  
+  for (let i = 0; i < apiUrls.length; i++) {
+    const apiUrl = apiUrls[i];
+    const isLastAttempt = i === apiUrls.length - 1;
+    
+    info("HuggingFace", `尝试 URL [${i + 1}/${apiUrls.length}]: ${apiUrl}`);
+    
+    try {
+      // 步骤1: 提交任务到队列
+      const queueResponse = await fetchWithTimeout(`${apiUrl}/gradio_api/call/generate_image`, {
+        method: "POST",
+        headers,
+        body: requestBody,
+      });
+
+      if (!queueResponse.ok) {
+        const errorText = await queueResponse.text();
+        throw new Error(`API Error (${queueResponse.status}): ${errorText}`);
+      }
+
+      const { event_id } = await queueResponse.json();
+      info("HuggingFace", `任务已提交成功, Event ID: ${event_id}`);
+
+      // 步骤2: 获取结果 (SSE 流)
+      const resultResponse = await fetchWithTimeout(`${apiUrl}/gradio_api/call/generate_image/${event_id}`, {
+        method: "GET",
+        headers,
+      });
+
+      if (!resultResponse.ok) {
+        const errorText = await resultResponse.text();
+        throw new Error(`Result API Error (${resultResponse.status}): ${errorText}`);
+      }
+
+      const sseText = await resultResponse.text();
+      
+      // 解析 SSE 流，提取 complete 事件的数据
+      const imageUrl = extractImageUrlFromSSE(sseText);
+      
+      if (!imageUrl) {
+        throw new Error("返回数据格式异常：未能从 SSE 流中提取图片 URL");
+      }
+
+      // 成功获取图片！
+      logGeneratedImages("HuggingFace", requestId, [{ url: imageUrl }]);
+      const duration = Date.now() - startTime;
+      logImageGenerationComplete("HuggingFace", requestId, 1, duration);
+      
+      info("HuggingFace", `✅ 成功使用 URL: ${apiUrl}`);
+      
+      const result = `![Generated Image](${imageUrl})`;
+      logApiCallEnd("HuggingFace", "generate_image", true, duration);
+      return result;
+
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      error("HuggingFace", `❌ URL [${apiUrl}] 失败: ${lastError.message}`);
+      
+      // 如果还有更多 URL，提示即将切换
+      if (!isLastAttempt) {
+        info("HuggingFace", `🔄 正在切换到下一个 URL...`);
+      }
+      // 如果是最后一个 URL，抛出错误
+    }
+  }
+
+  // 所有 URL 都尝试完毕，仍然失败
+  const err = lastError || new Error("所有 HuggingFace URL 均失败");
+  error("HuggingFace", `💥 所有 URL 均失败: ${err.message}`);
+  logImageGenerationFailed("HuggingFace", requestId, `所有 URL 均失败: ${err.message}`);
+  logApiCallEnd("HuggingFace", "generate_image", false, Date.now() - startTime);
+  throw err;
+}
+
+// 从 SSE 流中提取图片 URL
+function extractImageUrlFromSSE(sseStream: string): string | null {
+  const lines = sseStream.split('\n');
+  let isCompleteEvent = false;
+
+  for (const line of lines) {
+    if (line.startsWith('event:')) {
+      const eventType = line.substring(6).trim();
+      if (eventType === 'complete') {
+        isCompleteEvent = true;
+      } else if (eventType === 'error') {
+        throw new Error("HuggingFace API 返回错误");
+      } else {
+        isCompleteEvent = false;
+      }
+    } else if (line.startsWith('data:') && isCompleteEvent) {
+      const jsonData = line.substring(5).trim();
+      try {
+        const data = JSON.parse(jsonData);
+        // data[0] 应该是图片对象 { url: "..." }
+        if (data && data[0] && data[0].url) {
+          return data[0].url;
+        }
+      } catch (e) {
+        error("HuggingFace", `解析 SSE 数据失败: ${e}`);
+      }
+    }
+  }
+  return null;
+}
+
 // ================= 主处理函数 =================
 
 async function handleChatCompletions(req: Request): Promise<Response> {
@@ -413,12 +589,20 @@ async function handleChatCompletions(req: Request): Promise<Response> {
 
   logRequestStart(req, requestId);
 
+  // 基础路径健康检查 (用于 Docker healthcheck)
+  if (url.pathname === "/" || url.pathname === "/health") {
+    return new Response(JSON.stringify({ status: "ok", service: "img-router" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    });
+  }
+
   if (url.pathname !== "/v1/chat/completions") {
     warn("HTTP", `路由不匹配: ${url.pathname}`);
     await logRequestEnd(requestId, req.method, url.pathname, 404, 0);
-    return new Response(JSON.stringify({ error: "Not found" }), { 
-      status: 404, 
-      headers: { "Content-Type": "application/json" } 
+    return new Response(JSON.stringify({ error: "Not found" }), {
+      status: 404,
+      headers: { "Content-Type": "application/json" }
     });
   }
 
@@ -465,6 +649,9 @@ async function handleChatCompletions(req: Request): Promise<Response> {
         break;
       case "ModelScope":
         imageContent = await handleModelScope(apiKey, requestBody, prompt, requestId);
+        break;
+      case "HuggingFace":
+        imageContent = await handleHuggingFace(apiKey, requestBody, prompt, images, requestId);
         break;
     }
 
@@ -568,7 +755,7 @@ if (logLevel && logLevel in LogLevel) {
 }
 
 info("Startup", `🚀 服务启动端口 ${PORT}`);
-info("Startup", "🔧 支持: 火山引擎, Gitee, ModelScope");
+info("Startup", "🔧 支持: 火山引擎, Gitee, ModelScope, HuggingFace");
 info("Startup", `📁 日志目录: ./data/logs`);
 
 Deno.addSignalListener("SIGINT", async () => {
