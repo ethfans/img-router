@@ -7,6 +7,10 @@ services:
       - "10001:10001"
     environment:
       - PORT=10001
+      - IMAGE_BED_BASE_URL=${IMAGE_BED_BASE_URL}
+      - IMAGE_BED_AUTH_CODE=${IMAGE_BED_AUTH_CODE}
+      - IMAGE_BED_UPLOAD_FOLDER=${IMAGE_BED_UPLOAD_FOLDER}
+      - IMAGE_BED_UPLOAD_CHANNEL=${IMAGE_BED_UPLOAD_CHANNEL}
     restart: always
     # 健康检查已禁用 - Deno 镜像不包含 wget/curl
     # 如需启用，请在 Dockerfile 中安装 curl 或使用 Deno 的 fetch API

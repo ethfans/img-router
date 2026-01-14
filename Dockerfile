@@ -1,12 +1,15 @@
 FROM denoland/deno:latest
 WORKDIR /app
 
-COPY main.ts .
-COPY config.ts .
+# 复制配置文件
 COPY deno.json .
-COPY logger.ts .
-COPY error-handler.ts .
+COPY deno.lock .
 
-RUN deno cache main.ts
+# 复制源代码目录
+COPY src/ ./src/
+
+# 缓存依赖
+RUN deno cache src/main.ts
+
 EXPOSE 10001
-CMD ["run", "--allow-net", "--allow-env", "--allow-read", "--allow-write", "main.ts"]
+CMD ["run", "--allow-net", "--allow-env", "--allow-read", "--allow-write", "src/main.ts"]
