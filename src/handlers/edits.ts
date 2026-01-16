@@ -1,14 +1,17 @@
 /**
  * Images Edit 端点处理器
  *
- * 处理 /v1/images/edits 端点（图生图/图片编辑）
- * - 支持 multipart/form-data（OpenAI 风格）与 JSON（兼容部分客户端）
- * - 根据 Authorization Bearer API Key 自动路由到对应 Provider
- * - 返回 OpenAI Images API 兼容格式：{ created, data: [{ url? | b64_json? }] }
+ * 处理 /v1/images/edits 端点（图生图/图片编辑）。
+ * 
+ * 功能特性：
+ * - 支持 **multipart/form-data**：标准 OpenAI 风格，适合上传文件。
+ * - 支持 **JSON**：兼容部分客户端，通过 Base64 或 URL 传递图片。
+ * - **自动路由**：根据 Authorization Header 中的 API Key 自动路由到对应的 Provider。
+ * - **格式兼容**：返回 OpenAI Images API 兼容的响应格式。
  *
- * 说明：
- * - 当前 Provider 统一以 ImageGenerationRequest.images[] 作为图片输入
- * - mask 参数在旧版实现中未实际参与下游调用；这里保持兼容：解析但不强依赖
+ * 注意事项：
+ * - 所有的 Provider 实现都统一接收 `ImageGenerationRequest`，其中 `images` 数组包含所有输入图片。
+ * - `mask` 参数虽然被解析，但目前的 Provider 实现大多不支持或通过其他方式（如 Alpha 通道）支持，因此暂未强依赖。
  */
 
 import { encodeBase64 } from "@std/encoding/base64";
@@ -26,14 +29,17 @@ import {
   error,
   generateRequestId,
   info,
-  logRequestEnd,
-  logRequestStart,
   warn,
 } from "../core/logger.ts";
 import { extractPromptAndImages, normalizeMessageContent } from "./chat.ts";
 
 /**
- * 将 multipart/file 转为 data URI（data:mime;base64,...）
+ * 将 File 对象转换为 Data URI
+ * 
+ * 用于处理 multipart/form-data 上传的文件。
+ *
+ * @param file - 上传的文件对象
+ * @returns Data URI 字符串 (data:image/png;base64,...)
  */
 async function fileToDataUri(file: File): Promise<string> {
   const arrayBuffer = await file.arrayBuffer();
@@ -45,18 +51,29 @@ async function fileToDataUri(file: File): Promise<string> {
 
 /**
  * 处理 /v1/images/edits 端点
+ * 
+ * 核心流程：
+ * 1. **鉴权与路由**：根据 API Key 检测 Provider。
+ * 2. **请求解析**：
+ *    - 如果是 `multipart/form-data`：解析 Form Data，提取文件并转换为 Data URI。
+ *    - 如果是 `application/json`：解析 JSON Body，提取 Base64 或 URL 图片。
+ * 3. **图片预处理**：统一压缩和格式化输入图片。
+ * 4. **Provider 调用**：执行图片编辑生成。
+ * 5. **响应构建**：根据 `response_format` 返回 URL 或 Base64 JSON。
+ *
+ * @param req - HTTP 请求对象
+ * @returns HTTP 响应对象
  */
 export async function handleImagesEdits(req: Request): Promise<Response> {
-  const url = new URL(req.url);
+  const _url = new URL(req.url);
   const requestId = generateRequestId();
 
-  logRequestStart(req, requestId);
-
+  // 1. 鉴权与路由
   const authHeader = req.headers.get("Authorization");
   const apiKey = authHeader?.replace("Bearer ", "").trim();
   if (!apiKey) {
     warn("HTTP", "Authorization header 缺失");
-    logRequestEnd(requestId, req.method, url.pathname, 401, 0, "missing auth");
+
     return new Response(JSON.stringify({ error: "Authorization header missing" }), {
       status: 401,
       headers: { "Content-Type": "application/json" },
@@ -66,7 +83,7 @@ export async function handleImagesEdits(req: Request): Promise<Response> {
   const provider = providerRegistry.detectProvider(apiKey);
   if (!provider) {
     warn("HTTP", "API Key 格式无法识别");
-    logRequestEnd(requestId, req.method, url.pathname, 401, 0, "invalid key");
+
     return new Response(
       JSON.stringify({ error: "Invalid API Key format. Could not detect provider." }),
       {
@@ -77,8 +94,8 @@ export async function handleImagesEdits(req: Request): Promise<Response> {
   }
 
   info("HTTP", `路由到 ${provider.name} (Images Edit)`);
-
-  const startTime = Date.now();
+  
+  const _startTime = Date.now();
 
   try {
     const contentType = req.headers.get("content-type") || "";
@@ -89,7 +106,9 @@ export async function handleImagesEdits(req: Request): Promise<Response> {
     let responseFormat: "url" | "b64_json" = "url";
     const images: string[] = [];
 
+    // 2. 请求解析
     if (contentType.includes("multipart/form-data")) {
+      // 处理表单上传
       const formData = await req.formData();
 
       prompt = (formData.get("prompt") as string) || "";
@@ -122,8 +141,10 @@ export async function handleImagesEdits(req: Request): Promise<Response> {
         warn("HTTP", "mask 参数已提供，但当前实现不保证所有 Provider 支持遮罩编辑");
       }
     } else {
+      // 处理 JSON 请求
       const jsonBody = await req.json();
 
+      // 兼容某些客户端发送 messages 数组的情况
       if (jsonBody?.messages && Array.isArray(jsonBody.messages)) {
         const normalizedMessages = (jsonBody.messages as Message[]).map((msg: Message) => ({
           ...msg,
@@ -142,6 +163,7 @@ export async function handleImagesEdits(req: Request): Promise<Response> {
           responseFormat = rf;
         }
       } else {
+        // 标准 JSON 请求
         const body = jsonBody as ImagesEditRequest;
 
         prompt = body?.prompt || "";
@@ -164,14 +186,7 @@ export async function handleImagesEdits(req: Request): Promise<Response> {
 
     if (images.length === 0) {
       warn("HTTP", "Images Edit 请求缺少 image");
-      logRequestEnd(
-        requestId,
-        req.method,
-        url.pathname,
-        400,
-        Date.now() - startTime,
-        "missing image",
-      );
+
       return new Response(
         JSON.stringify({ error: "必须提供 image（multipart/form-data 或 JSON 字段）" }),
         {
@@ -181,6 +196,7 @@ export async function handleImagesEdits(req: Request): Promise<Response> {
       );
     }
 
+    // 3. 图片预处理
     const compressedImages = await normalizeAndCompressInputImages(images);
 
     debug(
@@ -189,6 +205,7 @@ export async function handleImagesEdits(req: Request): Promise<Response> {
     );
     debug("Router", `Images Edit 图片数量: ${images.length}`);
 
+    // 4. Provider 调用
     const generationRequest: ImageGenerationRequest = {
       prompt,
       images: compressedImages,
@@ -200,14 +217,7 @@ export async function handleImagesEdits(req: Request): Promise<Response> {
     const validationError = provider.validateRequest(generationRequest);
     if (validationError) {
       warn("HTTP", `请求参数无效: ${validationError}`);
-      logRequestEnd(
-        requestId,
-        req.method,
-        url.pathname,
-        400,
-        Date.now() - startTime,
-        validationError,
-      );
+
       return new Response(JSON.stringify({ error: validationError }), {
         status: 400,
         headers: { "Content-Type": "application/json" },
@@ -223,6 +233,7 @@ export async function handleImagesEdits(req: Request): Promise<Response> {
       throw new Error(generationResult.error || "图片编辑失败");
     }
 
+    // 5. 响应构建
     const output: ImageData[] = generationResult.images || [];
     const data: ImageData[] = [];
 
@@ -261,7 +272,6 @@ export async function handleImagesEdits(req: Request): Promise<Response> {
     };
 
     info("HTTP", "响应完成 (Images Edit API)");
-    logRequestEnd(requestId, req.method, url.pathname, 200, Date.now() - startTime);
 
     return new Response(JSON.stringify(responseBody), {
       headers: {
@@ -274,7 +284,6 @@ export async function handleImagesEdits(req: Request): Promise<Response> {
     const errorProvider = provider?.name || "Unknown";
 
     error("Proxy", `请求处理错误 (${errorProvider}): ${errorMessage}`);
-    logRequestEnd(requestId, req.method, url.pathname, 500, Date.now() - startTime, errorMessage);
 
     return new Response(
       JSON.stringify({

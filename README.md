@@ -39,7 +39,7 @@
 │  • hf_* 开头           → HuggingFace (抱抱脸)                │
 │  • ms-* 开头           → ModelScope (魔搭)                   │
 │  • pk_* / sk_* 开头    → Pollinations                        │
-│  • UUID 格式           → VolcEngine (火山引擎/豆包)           │
+│  • UUID 格式           → Doubao Seedream (火山引擎/豆包)           │
 │  • 30-60位字母数字     → Gitee (模力方舟)                     │
 │                                                             │
 └──────────────────────┬──────────────────────────────────────┘
@@ -47,7 +47,7 @@
            ┌───────────┼───────────┬───────────┬───────────┐
            ▼           ▼           ▼           ▼           ▼
      ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐
-     │VolcEngine│ │  Gitee   │ │ModelScope│ │HuggingFace│ │Pollinations │
+     │Doubao Seedream│ │  Gitee   │ │ModelScope│ │HuggingFace│ │Pollinations │
      │ (火山)   │ │(模力方舟) │ │  (魔搭)  │ │ (抱抱脸)  │ │              │
      └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────────┘
            │           │           │           │           │
@@ -146,12 +146,12 @@ deno task start
 
 ## 自定义配置
 
-所有渠道的模型、分辨率、API 地址等配置都在 `src/config/index.ts` 文件中，你可以根据需要自行修改。
+所有渠道的模型、分辨率、API 地址等配置都在 `src/config/manager.ts` 文件中，你可以根据需要自行修改。
 
-### 配置文件结构
+### 核心配置
 
 ```typescript
-// src/config/index.ts 主要配置项
+// src/config/manager.ts 主要配置项
 
 // 1. 图床配置（用于 Base64 转 URL）
 export const ImageBedConfig = {
@@ -161,7 +161,7 @@ export const ImageBedConfig = {
 };
 
 // 2. 各渠道配置
-export const VolcEngineConfig = { ... };
+export const Doubao SeedreamConfig = { ... };
 export const GiteeConfig = { ... };
 export const ModelScopeConfig = { ... };
 export const HuggingFaceConfig = { ... };
@@ -174,7 +174,7 @@ export const PollinationsConfig = { ... };
 
 ```typescript
 // 火山引擎 - 修改默认模型
-export const VolcEngineConfig = {
+export const Doubao SeedreamConfig = {
   defaultModel: "doubao-seedream-4-5-251128", // ← 改这里
   // ...
 };
@@ -194,7 +194,7 @@ export const GiteeConfig = {
 
 ```typescript
 // 火山引擎 - 添加/删除支持的模型
-export const VolcEngineConfig = {
+export const Doubao SeedreamConfig = {
   supportedModels: [
     "doubao-seedream-4-5-251128",
     "doubao-seedream-4-0-250828",
@@ -224,7 +224,7 @@ export const GiteeConfig = {
 
 ```typescript
 // 火山引擎
-export const VolcEngineConfig = {
+export const Doubao SeedreamConfig = {
   defaultSize: "2K", // 文生图默认尺寸
   defaultEditSize: "2K", // 图生图默认尺寸
   // ...
@@ -323,7 +323,7 @@ export const API_TIMEOUT_MS = 300000;
 
 | 渠道         | 格式                | 示例                                         | 获取地址                                                                                       |
 | ------------ | ------------------- | -------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| 火山引擎     | UUID                | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`       | [获取密钥](https://console.volcengine.com/ark/region:ark+cn-beijing/openManagement/rewardPlan) |
+| 火山引擎     | UUID                | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`       | [获取密钥](https://console.Doubao Seedream.com/ark/region:ark+cn-beijing/openManagement/rewardPlan) |
 | Gitee        | 30-60位字母数字     | `abc123def456...`                            | [获取密钥](https://ai.gitee.com/ondobtug/dashboard/settings/tokens)                            |
 | ModelScope   | `ms-` 开头          | `ms-xxxxxxxxxx`                              | [获取密钥](https://www.modelscope.cn/my/myaccesstoken)                                         |
 | Hugging Face | `hf_` 开头          | `hf_xxxxxxxxxx`                              | [获取密钥](https://huggingface.co/settings/tokens)                                             |

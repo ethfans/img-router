@@ -1,0 +1,885 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import process from 'node:process';
+
+/**
+ * 服务器配置接口
+ */
+export interface ServerConfig {
+  /** 服务器监听端口 */
+  port: number;
+  /** API 请求超时时间（毫秒） */
+  apiTimeoutMs: number;
+  /** 最大请求体大小（字节） */
+  maxRequestBodySize: number;
+  /** 全局访问密钥，用于简单的身份验证 */
+  globalAccessKey: string;
+  /** 压缩配置 */
+  compress: {
+    /** 触发压缩的大小阈值（KB） */
+    threshold: number;
+    /** 压缩后的目标大小（KB） */
+    target: number;
+  };
+}
+
+/**
+ * API 密钥配置接口
+ * 存储各个 AI 服务提供商的认证信息
+ */
+export interface ApiKeysConfig {
+  /** 豆包 (Doubao) 配置 */
+  doubao: {
+    accessKey: string;
+    secretKey: string;
+  };
+  /** Gitee AI 访问令牌 */
+  gitee: string;
+  /** ModelScope 访问令牌 */
+  modelscope: string;
+  /** HuggingFace 访问令牌 */
+  huggingface: string;
+  /** Pollinations AI (通常不需要密钥) */
+  pollinations: string;
+}
+
+/**
+ * 默认生成参数配置
+ */
+export interface DefaultsConfig {
+  /** 默认使用的模型名称 */
+  imageModel: string;
+  /** 默认图片尺寸 */
+  imageSize: string;
+  /** 默认图片质量 */
+  imageQuality: string;
+  /** 默认生成数量 */
+  imageCount: number;
+}
+
+/**
+ * 基础提供商配置接口
+ */
+export interface BaseProviderConfig {
+  /** 是否启用该提供商 */
+  enabled: boolean;
+  /** API 基础地址 */
+  apiUrl: string;
+  /** 默认使用的模型 */
+  defaultModel: string;
+  /** 默认图片尺寸 */
+  defaultSize: string;
+  /** 支持的模型列表 */
+  supportedModels: string[];
+}
+
+/**
+ * 豆包提供商配置
+ */
+export interface DoubaoConfig extends BaseProviderConfig {
+  /** 默认编辑图片的尺寸 */
+  defaultEditSize?: string;
+}
+
+/**
+ * Gitee AI 提供商配置
+ */
+export interface GiteeConfig extends BaseProviderConfig {
+  /** 图片编辑 API 地址 */
+  editApiUrl: string;
+  /** 异步图片编辑 API 地址 */
+  asyncEditApiUrl: string;
+  /** 任务状态查询 API 地址 */
+  taskStatusUrl: string;
+  /** 默认编辑模型 */
+  defaultEditModel: string;
+  /** 默认异步编辑模型 */
+  defaultAsyncEditModel: string;
+  /** 默认编辑尺寸 */
+  defaultEditSize: string;
+  /** 默认异步编辑尺寸 */
+  defaultAsyncEditSize: string;
+  /** 支持的编辑模型列表 */
+  editModels: string[];
+  /** 支持的异步编辑模型列表 */
+  asyncEditModels: string[];
+}
+
+/**
+ * ModelScope 提供商配置
+ */
+export interface ModelScopeConfig extends BaseProviderConfig {
+  /** 默认编辑模型 */
+  defaultEditModel: string;
+  /** 默认编辑尺寸 */
+  defaultEditSize: string;
+  /** 支持的编辑模型列表 */
+  editModels: string[];
+}
+
+/**
+ * HuggingFace 提供商配置
+ */
+export interface HuggingFaceConfig {
+  /** 是否启用 */
+  enabled?: boolean;
+  /** 可用的 API 地址列表（用于负载均衡或备选） */
+  apiUrls: string[];
+  /** 编辑功能的 API 地址列表 */
+  editApiUrls?: string[];
+  /** 默认生成模型 */
+  defaultModel: string;
+  /** 默认编辑模型 */
+  defaultEditModel: string;
+  /** 默认生成尺寸 */
+  defaultSize: string;
+  /** 默认编辑尺寸 */
+  defaultEditSize: string;
+  /** 支持的生成模型列表 */
+  supportedModels: string[];
+  /** 支持的编辑模型列表 */
+  editModels: string[];
+}
+
+/**
+ * Pollinations AI 提供商配置
+ */
+export interface PollinationsConfig extends BaseProviderConfig {
+  /** 图片生成端点路径 */
+  imageEndpoint?: string;
+  /** 默认编辑模型 */
+  defaultEditModel: string;
+  /** 默认编辑尺寸 */
+  defaultEditSize?: string;
+  /** 支持的编辑模型列表 */
+  editModels: string[];
+  /** 随机种子 */
+  seed?: number;
+  /** 图片质量 */
+  quality?: string;
+  /** 是否开启透明背景 */
+  transparent?: boolean;
+  /** 是否增强提示词 */
+  enhance?: boolean;
+  /** 负面提示词 */
+  negativePrompt?: string;
+  /** 是否私有模式 */
+  private?: boolean;
+  /** 是否移除 Logo */
+  nologo?: boolean;
+  /** 是否不显示在 Feed 中 */
+  nofeed?: boolean;
+  /** 是否开启安全滤镜 */
+  safe?: boolean;
+  /** 引导系数 */
+  guidanceScale?: number;
+}
+
+/**
+ * 图床配置接口
+ */
+export interface ImageBedConfig {
+  /** 图床基础 URL */
+  baseUrl: string;
+  /** 上传端点 */
+  uploadEndpoint: string;
+  /** 认证码 */
+  authCode: string;
+  /** 上传文件夹名称 */
+  uploadFolder: string;
+  /** 上传渠道 (如 s3) */
+  uploadChannel: string;
+}
+
+/**
+ * 日志配置接口
+ */
+export interface LoggingConfig {
+  /** 日志级别 (如 info, debug, error) */
+  level: string;
+  /** 是否开启详细日志 */
+  verbose: boolean;
+  /** 是否记录请求日志 */
+  request: boolean;
+}
+
+/**
+ * 功能开关配置
+ */
+export interface FeaturesConfig {
+  /** 是否启用 CORS */
+  cors: boolean;
+  /** 是否启用健康检查端点 */
+  healthCheck: boolean;
+}
+
+/**
+ * 运行模式配置
+ */
+export interface ModesConfig {
+  /** 中继模式：转发请求到上游服务 */
+  relay: boolean;
+  /** 后端模式：处理具体的业务逻辑 */
+  backend: boolean;
+}
+
+/**
+ * 应用主配置接口
+ */
+export interface AppConfig {
+  server: ServerConfig;
+  apiKeys: ApiKeysConfig;
+  defaults: DefaultsConfig;
+  providers: {
+    doubao: DoubaoConfig;
+    gitee: GiteeConfig;
+    modelscope: ModelScopeConfig;
+    huggingface: HuggingFaceConfig;
+    pollinations: PollinationsConfig;
+  };
+  imageBed: ImageBedConfig;
+  logging: LoggingConfig;
+  features: FeaturesConfig;
+  modes: ModesConfig;
+}
+
+// 运行时/系统配置类型 (与 app.ts 预期一致)
+
+/**
+ * 密钥池项接口
+ */
+export interface KeyPoolItem {
+  /** API 密钥 */
+  key: string;
+  /** 所属提供商 */
+  provider: string;
+  /** 密钥状态 */
+  status: 'active' | 'disabled' | 'rate_limited';
+  /** 最后使用时间戳 */
+  lastUsed?: number;
+  /** 错误计数 */
+  errorCount?: number;
+  
+  // 扩展字段
+  id?: string;
+  name?: string;
+  enabled?: boolean;
+  addedAt?: number;
+  successCount?: number;
+  totalCalls?: number;
+}
+
+/**
+ * 提供商任务默认配置
+ */
+export interface ProviderTaskDefaults {
+  model?: string | null;
+  size?: string | null;
+  quality?: string | null;
+  n?: number | null;
+}
+
+export type ProviderTaskDefaultsPatch = Partial<ProviderTaskDefaults>;
+
+/**
+ * 运行时提供商配置
+ */
+export interface RuntimeProviderConfig {
+  /** 是否启用 */
+  enabled?: boolean;
+  /** 文本生成任务默认配置 */
+  text?: ProviderTaskDefaults;
+  /** 编辑任务默认配置 */
+  edit?: ProviderTaskDefaults;
+}
+
+/**
+ * 系统配置接口
+ */
+export interface SystemConfig {
+  globalAccessKey?: string;
+  modes?: ModesConfig;
+  /** 可扩展的其他系统级动态设置 */
+  // deno-lint-ignore no-explicit-any
+  [key: string]: any; 
+}
+
+/**
+ * 运行时完整配置
+ */
+export interface RuntimeConfig {
+  system: SystemConfig;
+  providers: Record<string, RuntimeProviderConfig>;
+  keyPools: Record<string, KeyPoolItem[]>;
+}
+
+export type DynamicSystemConfig = SystemConfig; // 别名
+
+// 兼容性类型别名
+export type GiteeProviderConfig = GiteeConfig;
+export type ModelScopeProviderConfig = ModelScopeConfig;
+export type HuggingFaceProviderConfig = HuggingFaceConfig;
+export type PollinationsProviderConfig = PollinationsConfig;
+export type DoubaoProviderConfig = DoubaoConfig;
+
+// ============================================================================\n// 常量与默认值\n// ============================================================================
+
+/** 支持的图片尺寸列表 */
+export const SUPPORTED_SIZES = [
+  "256x256", "512x512", "1024x1024", "1024x768", "768x1024", "2048x2048"
+];
+
+/** 宽高比到具体尺寸的映射 */
+export const SIZE_MAPPING: Record<string, string> = {
+  "1:1": "1024x1024",
+  "4:3": "1024x768",
+  "3:4": "768x1024",
+  "16:9": "1024x576",
+  "9:16": "576x1024"
+};
+
+/** 
+ * 默认应用配置 
+ * 包含所有服务的初始设置
+ */
+const DEFAULT_CONFIG: AppConfig = {
+  server: {
+    port: 10001,
+    apiTimeoutMs: 60000,
+    maxRequestBodySize: 20971520, // 20MB
+    globalAccessKey: "",
+    compress: {
+      threshold: 10,
+      target: 5
+    }
+  },
+  apiKeys: {
+    doubao: {
+      accessKey: "",
+      secretKey: ""
+    },
+    gitee: "",
+    modelscope: "",
+    huggingface: "",
+    pollinations: ""
+  },
+  defaults: {
+    imageModel: "doubao-seedream-4-5-251128",
+    imageSize: "1024x1024",
+    imageQuality: "standard",
+    imageCount: 1
+  },
+  providers: {
+    doubao: {
+      enabled: true,
+      apiUrl: "https://ark.cn-beijing.volces.com/api/v3/images/generations",
+      defaultModel: "test-doubao-model",
+      defaultSize: "1024x1024",
+      defaultEditSize: "2K",
+      supportedModels: [
+        "doubao-seedream-4-5-251128",
+        "doubao-seedream-4-0-250828"
+      ]
+    },
+    gitee: {
+      enabled: true,
+      apiUrl: "https://ai.gitee.com/v1/images/generations",
+      editApiUrl: "https://ai.gitee.com/v1/images/edits",
+      asyncEditApiUrl: "https://ai.gitee.com/v1/async/images/edits",
+      taskStatusUrl: "https://ai.gitee.com/v1/task",
+      defaultModel: "z-image-turbo",
+      defaultEditModel: "Qwen-Image-Edit",
+      defaultAsyncEditModel: "Qwen-Image-Edit-2511",
+      defaultSize: "2048x2048",
+      defaultEditSize: "1024x1024",
+      defaultAsyncEditSize: "2048x2048",
+      supportedModels: [
+        "z-image-turbo"
+      ],
+      editModels: [
+        "Qwen-Image-Edit",
+        "HiDream-E1-Full",
+        "FLUX.1-dev",
+        "FLUX.2-dev",
+        "FLUX.1-Kontext-dev",
+        "HelloMeme",
+        "Kolors",
+        "OmniConsistency",
+        "InstantCharacter",
+        "DreamO",
+        "LongCat-Image-Edit",
+        "AnimeSharp"
+      ],
+      asyncEditModels: [
+        "Qwen-Image-Edit-2511",
+        "LongCat-Image-Edit",
+        "FLUX.1-Kontext-dev"
+      ]
+    },
+    modelscope: {
+      enabled: true,
+      apiUrl: "https://api-inference.modelscope.cn/v1",
+      defaultModel: "Tongyi-MAI/Z-Image-Turbo",
+      defaultEditModel: "Qwen/Qwen-Image-Edit",
+      defaultSize: "1024x1024",
+      defaultEditSize: "1024x1024",
+      supportedModels: [
+        "Tongyi-MAI/Z-Image-Turbo"
+      ],
+      editModels: [
+        "Qwen/Qwen-Image-Edit-2511",
+        "Qwen/Qwen-Image-Edit-2509",
+        "Qwen/Qwen-Image-Edit"
+      ]
+    },
+    huggingface: {
+      enabled: true,
+      apiUrls: [
+        "https://mrfakename-z-image-turbo.hf.space",
+        "https://luca115-z-image-turbo.hf.space",
+        "https://linoyts-z-image-portrait.hf.space",
+        "https://prokofyev8-z-image-portrait.hf.space",
+        "https://yingzhac-z-image-nsfw.hf.space"
+      ],
+      editApiUrls: [
+        "https://lenml-qwen-image-edit-2511-fast.hf.space"
+      ],
+      defaultModel: "z-image-turbo",
+      defaultEditModel: "Qwen-Image-Edit-2511",
+      defaultSize: "1024x1024",
+      defaultEditSize: "1024x1024",
+      supportedModels: [
+        "z-image-turbo"
+      ],
+      editModels: [
+        "Qwen-Image-Edit-2511"
+      ]
+    },
+    pollinations: {
+      enabled: true,
+      apiUrl: "https://image.pollinations.ai",
+      imageEndpoint: "/prompt",
+      defaultModel: "flux",
+      defaultEditModel: "nanobanana-pro",
+      defaultSize: "1024x1024",
+      defaultEditSize: "1024x1024",
+      supportedModels: [
+        "flux", "turbo", "zimage", "kontext", "nanobanana", "nanobanana-pro",
+        "seedream", "seedream-pro", "gptimage", "gptimage-large", "veo",
+        "seedance", "seedance-pro"
+      ],
+      editModels: [
+        "nanobanana-pro", "gptimage", "gptimage-large", "nanobanana",
+        "seedream", "seedream-pro"
+      ],
+      seed: -1,
+      quality: "hd",
+      transparent: false,
+      enhance: true,
+      negativePrompt: "",
+      private: true,
+      nologo: true,
+      nofeed: false,
+      safe: false
+    }
+  },
+  imageBed: {
+    baseUrl: "https://imgbed.lianwusuoai.top",
+    uploadEndpoint: "/upload",
+    authCode: "imgbed_xKAGfobLGhsEBEMlt5z0yvYdtw8zNTM6",
+    uploadFolder: "img-router",
+    uploadChannel: "s3"
+  },
+  logging: {
+    level: "info",
+    verbose: true,
+    request: true
+  },
+  features: {
+    cors: true,
+    healthCheck: true
+  },
+  modes: {
+    relay: true,
+    backend: false
+  }
+};
+
+export const DOUBAO_MODELS = DEFAULT_CONFIG.providers.doubao.supportedModels;
+export const GITEE_MODELS = DEFAULT_CONFIG.providers.gitee.supportedModels;
+export const MODELSCOPE_MODELS = DEFAULT_CONFIG.providers.modelscope.supportedModels;
+export const HUGGINGFACE_MODELS = DEFAULT_CONFIG.providers.huggingface.supportedModels;
+export const POLLINATIONS_MODELS = DEFAULT_CONFIG.providers.pollinations.supportedModels;
+export const ALL_SUPPORTED_MODELS = [
+  ...DOUBAO_MODELS,
+  ...GITEE_MODELS,
+  ...MODELSCOPE_MODELS,
+  ...HUGGINGFACE_MODELS,
+  ...POLLINATIONS_MODELS
+];
+
+/**
+ * 配置管理器类
+ * 负责加载、合并和管理应用程序的静态与动态配置
+ */
+class ConfigManager {
+  private config: AppConfig;
+  private runtimeConfig: RuntimeConfig;
+  private readonly runtimeConfigPath: string;
+
+  constructor() {
+    this.runtimeConfigPath = path.resolve(process.cwd(), 'runtime-config.json');
+    
+    // 初始化为默认配置
+    this.config = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+    this.runtimeConfig = this.loadRuntimeConfig();
+    
+    // 将运行时配置合并到应用配置中
+    this.applyRuntimeOverrides();
+  }
+
+  /**
+   * 加载运行时配置
+   * 从 runtime-config.json 文件读取配置，如果文件不存在则返回空配置
+   * @returns {RuntimeConfig} 运行时配置对象
+   */
+  private loadRuntimeConfig(): RuntimeConfig {
+    try {
+      if (fs.existsSync(this.runtimeConfigPath)) {
+        const content = fs.readFileSync(this.runtimeConfigPath, 'utf8');
+        const loaded = JSON.parse(content);
+        // 基本的迁移/验证逻辑（如果需要）
+        return {
+          system: loaded.system || {},
+          providers: loaded.providers || {},
+          keyPools: loaded.keyPools || {}
+        };
+      }
+    } catch (e) {
+      console.error("加载 runtime-config.json 失败", e);
+    }
+    return {
+      system: {},
+      providers: {},
+      keyPools: {}
+    };
+  }
+
+  /**
+   * 应用运行时覆盖
+   * 将动态配置覆盖到静态配置上，优先级：Env Vars > Runtime Config > Default Config
+   */
+  private applyRuntimeOverrides() {
+    // 1. 应用系统配置 (全局密钥, 模式)
+    if (this.runtimeConfig.system.globalAccessKey !== undefined) {
+      this.config.server.globalAccessKey = this.runtimeConfig.system.globalAccessKey;
+    }
+    if (this.runtimeConfig.system.modes) {
+      this.config.modes = { ...this.config.modes, ...this.runtimeConfig.system.modes };
+    }
+
+    // 2. 应用提供商覆盖 (启用状态)
+    for (const [providerName, pConfig] of Object.entries(this.runtimeConfig.providers)) {
+      if (pConfig.enabled !== undefined) {
+        // deno-lint-ignore no-explicit-any
+        const appProvider = (this.config.providers as any)[providerName];
+        if (appProvider) {
+          appProvider.enabled = pConfig.enabled;
+        }
+      }
+    }
+    
+    // 3. 应用环境变量 (最高优先级)
+    if (process.env.PORT) this.config.server.port = parseInt(process.env.PORT);
+    if (process.env.API_TIMEOUT_MS) this.config.server.apiTimeoutMs = parseInt(process.env.API_TIMEOUT_MS);
+    if (process.env.LOG_LEVEL) this.config.logging.level = process.env.LOG_LEVEL;
+  }
+
+  /**
+   * 保存运行时配置到磁盘
+   */
+  public saveRuntimeConfig() {
+    try {
+      fs.writeFileSync(this.runtimeConfigPath, JSON.stringify(this.runtimeConfig, null, 2));
+    } catch (e) {
+      console.error("保存运行时配置失败", e);
+    }
+  }
+
+  // ==========================================
+  // Getters - 获取具体配置项
+  // ==========================================
+
+  get PORT() { return this.config.server.port; }
+  get API_TIMEOUT_MS() { return this.config.server.apiTimeoutMs; }
+  get MAX_REQUEST_BODY_SIZE() { return this.config.server.maxRequestBodySize; }
+  get GLOBAL_ACCESS_KEY() { return this.config.server.globalAccessKey; }
+  get COMPRESS_THRESHOLD() { return this.config.server.compress.threshold; }
+  get COMPRESS_TARGET() { return this.config.server.compress.target; }
+  
+  get LOG_LEVEL() { return this.config.logging.level; }
+  get VERBOSE_LOGGING() { return this.config.logging.verbose; }
+  get ENABLE_CORS() { return this.config.features.cors; }
+  get ENABLE_REQUEST_LOGGING() { return this.config.logging.request; }
+  get ENABLE_HEALTH_CHECK() { return this.config.features.healthCheck; }
+
+  get DOUBAO_ACCESS_KEY() { return this.config.apiKeys.doubao.accessKey; }
+  get DOUBAO_SECRET_KEY() { return this.config.apiKeys.doubao.secretKey; }
+  get GITEE_AI_API_KEY() { return this.config.apiKeys.gitee; }
+  get MODELSCOPE_API_KEY() { return this.config.apiKeys.modelscope; }
+  get HUGGINGFACE_API_KEY() { return this.config.apiKeys.huggingface; }
+  get POLLINATIONS_API_KEY() { return this.config.apiKeys.pollinations; }
+
+  get DEFAULT_IMAGE_MODEL() { return this.config.defaults.imageModel; }
+  get DEFAULT_IMAGE_SIZE() { return this.config.defaults.imageSize; }
+  get DEFAULT_IMAGE_QUALITY() { return this.config.defaults.imageQuality; }
+  get DEFAULT_IMAGE_COUNT() { return this.config.defaults.imageCount; }
+
+  get DoubaoConfig() { return this.config.providers.doubao; }
+  get GiteeConfig() { return this.config.providers.gitee; }
+  get ModelScopeConfig() { return this.config.providers.modelscope; }
+  get HuggingFaceConfig() { return this.config.providers.huggingface; }
+  get PollinationsConfig() { return this.config.providers.pollinations; }
+  
+  get ImageBedConfig() { return this.config.imageBed; }
+  get ModesConfig() { return this.config.modes; }
+
+  // ==========================================
+  // Methods - 配置操作方法
+  // ==========================================
+
+  /**
+   * 获取系统配置
+   * 返回合并后的系统配置，与 app.ts 预期兼容
+   */
+  public getSystemConfig(): SystemConfig {
+    return {
+      globalAccessKey: this.config.server.globalAccessKey,
+      modes: this.config.modes,
+      ...this.runtimeConfig.system
+    };
+  }
+
+  /**
+   * 获取完整的运行时配置对象
+   */
+  public getRuntimeConfig(): RuntimeConfig {
+    return this.runtimeConfig;
+  }
+
+  /**
+   * 更新系统配置
+   * @param {Partial<SystemConfig>} patch - 要更新的配置项
+   */
+  public updateSystemConfig(patch: Partial<SystemConfig>) {
+    this.runtimeConfig.system = { ...this.runtimeConfig.system, ...patch };
+    this.saveRuntimeConfig();
+    this.applyRuntimeOverrides();
+  }
+
+  /**
+   * 替换整个运行时配置
+   * @param {RuntimeConfig} newConfig - 新的运行时配置对象
+   */
+  public replaceRuntimeConfig(newConfig: RuntimeConfig) {
+    this.runtimeConfig = newConfig;
+    this.saveRuntimeConfig();
+    this.applyRuntimeOverrides();
+  }
+
+  /**
+   * 获取提供商的任务默认配置
+   * @param {string} provider - 提供商名称
+   * @param {string} [task] - 任务类型 (如 'text', 'edit')
+   * @returns {ProviderTaskDefaults} 任务默认配置
+   */
+  public getProviderTaskDefaults(provider: string, task?: string): ProviderTaskDefaults {
+    const config = this.runtimeConfig.providers[provider];
+    if (!config) return {};
+    if (task === 'text' || task === 'edit') {
+        return config[task] || {};
+    }
+    return config.text || {}; // 如果未指定任务或任务未知，默认为 text
+  }
+
+  /**
+   * 设置提供商的任务默认配置
+   * @param {string} provider - 提供商名称
+   * @param {string} task - 任务类型
+   * @param {ProviderTaskDefaults} defaults - 默认配置对象
+   */
+  public setProviderTaskDefaults(provider: string, task: string, defaults: ProviderTaskDefaults) {
+    if (!this.runtimeConfig.providers[provider]) {
+      this.runtimeConfig.providers[provider] = {};
+    }
+    if (task === 'text' || task === 'edit') {
+        this.runtimeConfig.providers[provider][task] = defaults;
+    }
+    this.saveRuntimeConfig();
+  }
+
+  /**
+   * 启用或禁用提供商
+   * @param {string} provider - 提供商名称
+   * @param {boolean} enabled - 是否启用
+   */
+  public setProviderEnabled(provider: string, enabled: boolean) {
+    if (!this.runtimeConfig.providers[provider]) {
+      this.runtimeConfig.providers[provider] = {};
+    }
+    this.runtimeConfig.providers[provider].enabled = enabled;
+    this.saveRuntimeConfig();
+    this.applyRuntimeOverrides();
+  }
+
+  /**
+   * 获取提供商的密钥池
+   * @param {string} provider - 提供商名称
+   * @returns {KeyPoolItem[]} 密钥列表
+   */
+  public getKeyPool(provider: string): KeyPoolItem[] {
+    return this.runtimeConfig.keyPools?.[provider] || [];
+  }
+
+  /**
+   * 更新提供商的密钥池
+   * @param {string} provider - 提供商名称
+   * @param {KeyPoolItem[]} keys - 新的密钥列表
+   */
+  public updateKeyPool(provider: string, keys: KeyPoolItem[]) {
+    if (!this.runtimeConfig.keyPools) this.runtimeConfig.keyPools = {};
+    this.runtimeConfig.keyPools[provider] = keys;
+    this.saveRuntimeConfig();
+  }
+
+  /**
+   * 获取下一个可用的密钥
+   * 从活跃密钥中随机选择一个
+   * @param {string} provider - 提供商名称
+   * @returns {string | null} 密钥，如果没有可用密钥则返回 null
+   */
+  public getNextAvailableKey(provider: string): string | null {
+    const keys = this.getKeyPool(provider);
+    const activeKeys = keys.filter(k => k.status === 'active' || (k.enabled !== false && k.status !== 'disabled'));
+    if (activeKeys.length === 0) return null;
+    return activeKeys[Math.floor(Math.random() * activeKeys.length)].key;
+  }
+
+  /**
+   * 报告密钥错误
+   * 增加错误计数，如果超过阈值则禁用该密钥
+   * @param {string} provider - 提供商名称
+   * @param {string} key - 密钥
+   * @param {string} [_reason] - 错误原因
+   */
+  public reportKeyError(provider: string, key: string, _reason?: string) {
+    const keys = this.getKeyPool(provider);
+    const item = keys.find(k => k.key === key);
+    if (item) {
+      item.errorCount = (item.errorCount || 0) + 1;
+      if (item.errorCount > 5) item.status = 'disabled';
+      this.updateKeyPool(provider, keys);
+    }
+  }
+
+  /**
+   * 报告密钥使用成功
+   * 重置错误计数，更新使用统计
+   * @param {string} provider - 提供商名称
+   * @param {string} key - 密钥
+   */
+  public reportKeySuccess(provider: string, key: string) {
+    const keys = this.getKeyPool(provider);
+    const item = keys.find(k => k.key === key);
+    if (item) {
+      item.errorCount = 0;
+      item.lastUsed = Date.now();
+      item.successCount = (item.successCount || 0) + 1;
+      item.totalCalls = (item.totalCalls || 0) + 1;
+      this.updateKeyPool(provider, keys);
+    }
+  }
+
+  /**
+   * 检查提供商是否已配置且启用
+   * @param {string} provider - 提供商名称
+   * @returns {boolean}
+   */
+  public isProviderConfigured(provider: string): boolean {
+    // deno-lint-ignore no-explicit-any
+    const p = (this.config.providers as any)?.[provider];
+    return p && p.enabled !== false;
+  }
+
+  /**
+   * 根据模型名称查找对应的提供商
+   * @param {string} model - 模型名称
+   * @returns {string | null} 提供商名称，如果未找到则返回 null
+   */
+  public getProviderForModel(model: string): string | null {
+    for (const [provider, conf] of Object.entries(this.config.providers)) {
+      // deno-lint-ignore no-explicit-any
+      if ((conf as any).supportedModels?.includes(model)) return provider;
+    }
+    return null;
+  }
+}
+
+// ============================================================================
+// 导出
+// ============================================================================
+
+export const configManager = new ConfigManager();
+
+// 扁平化导出，方便直接引用
+export const PORT = configManager.PORT;
+export const API_TIMEOUT_MS = configManager.API_TIMEOUT_MS;
+export const MAX_REQUEST_BODY_SIZE = configManager.MAX_REQUEST_BODY_SIZE;
+export const GLOBAL_ACCESS_KEY = configManager.GLOBAL_ACCESS_KEY;
+export const COMPRESS_THRESHOLD = configManager.COMPRESS_THRESHOLD;
+export const COMPRESS_TARGET = configManager.COMPRESS_TARGET;
+
+export const LOG_LEVEL = configManager.LOG_LEVEL;
+export const VERBOSE_LOGGING = configManager.VERBOSE_LOGGING;
+export const ENABLE_CORS = configManager.ENABLE_CORS;
+export const ENABLE_REQUEST_LOGGING = configManager.ENABLE_REQUEST_LOGGING;
+export const ENABLE_HEALTH_CHECK = configManager.ENABLE_HEALTH_CHECK;
+
+export const DOUBAO_ACCESS_KEY = configManager.DOUBAO_ACCESS_KEY;
+export const DOUBAO_SECRET_KEY = configManager.DOUBAO_SECRET_KEY;
+export const GITEE_AI_API_KEY = configManager.GITEE_AI_API_KEY;
+export const MODELSCOPE_API_KEY = configManager.MODELSCOPE_API_KEY;
+export const HUGGINGFACE_API_KEY = configManager.HUGGINGFACE_API_KEY;
+export const POLLINATIONS_API_KEY = configManager.POLLINATIONS_API_KEY;
+
+export const DEFAULT_IMAGE_MODEL = configManager.DEFAULT_IMAGE_MODEL;
+export const DEFAULT_IMAGE_SIZE = configManager.DEFAULT_IMAGE_SIZE;
+export const DEFAULT_IMAGE_QUALITY = configManager.DEFAULT_IMAGE_QUALITY;
+export const DEFAULT_IMAGE_COUNT = configManager.DEFAULT_IMAGE_COUNT;
+
+export const DoubaoConfig = configManager.DoubaoConfig;
+export const GiteeConfig = configManager.GiteeConfig;
+export const ModelScopeConfig = configManager.ModelScopeConfig;
+export const HuggingFaceConfig = configManager.HuggingFaceConfig;
+export const PollinationsConfig = configManager.PollinationsConfig;
+
+export const ImageBedConfig = configManager.ImageBedConfig;
+export const ModesConfig = configManager.ModesConfig;
+
+export const getSystemConfig = () => configManager.getSystemConfig();
+export const getRuntimeConfig = () => configManager.getRuntimeConfig();
+export const updateSystemConfig = (patch: Partial<SystemConfig>) => configManager.updateSystemConfig(patch);
+export const replaceRuntimeConfig = (newConfig: RuntimeConfig) => configManager.replaceRuntimeConfig(newConfig);
+
+export const getProviderTaskDefaults = (provider: string, task?: string) => configManager.getProviderTaskDefaults(provider, task);
+export const setProviderTaskDefaults = (provider: string, task: string, defaults: ProviderTaskDefaults) => configManager.setProviderTaskDefaults(provider, task, defaults);
+export const setProviderEnabled = (provider: string, enabled: boolean) => configManager.setProviderEnabled(provider, enabled);
+
+export const getKeyPool = (provider: string) => configManager.getKeyPool(provider);
+export const updateKeyPool = (provider: string, keys: KeyPoolItem[]) => configManager.updateKeyPool(provider, keys);
+export const getNextAvailableKey = (provider: string) => configManager.getNextAvailableKey(provider);
+export const reportKeyError = (provider: string, key: string, reason?: string) => configManager.reportKeyError(provider, key, reason);
+export const reportKeySuccess = (provider: string, key: string) => configManager.reportKeySuccess(provider, key);
+
+export const IMAGE_BED_CONFIG = configManager.ImageBedConfig;
+

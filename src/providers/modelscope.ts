@@ -1,6 +1,12 @@
 /**
  * ModelScope（魔搭）Provider 实现
- * 支持文生图（异步轮询）和图生图（多图融合）
+ *
+ * 基于阿里云 ModelScope 平台 API 实现。
+ * 支持文生图（异步轮询）和图生图（多图融合）功能。
+ * 特点：
+ * 1. 采用异步任务模式：提交任务 -> 获取 Task ID -> 轮询状态。
+ * 2. 图生图需要先将图片上传到公网可访问的图床（本实现中尝试自动转换或使用原始 URL）。
+ * 3. 具有复杂的任务状态判断逻辑，兼容不同的返回格式。
  */
 
 import {
@@ -11,7 +17,7 @@ import {
   type ProviderName,
 } from "./base.ts";
 import type { GenerationResult, ImageGenerationRequest } from "../types/index.ts";
-import { ModelScopeConfig } from "../config/index.ts";
+import { ModelScopeConfig } from "../config/manager.ts";
 import { base64ToUrl, fetchWithTimeout } from "../utils/index.ts";
 import { buildDataUri, urlToBase64 } from "../utils/image.ts";
 import {
@@ -29,18 +35,31 @@ import {
 import { parseErrorMessage } from "../core/error-handler.ts";
 import { withApiTiming } from "../middleware/timing.ts";
 
+/**
+ * ModelScope Provider 实现类
+ * 
+ * 封装了与 ModelScope 异步 API 的交互。
+ * 重点处理异步轮询和异常状态的兼容。
+ */
 export class ModelScopeProvider extends BaseProvider {
+  /** Provider 名称标识 */
   readonly name: ProviderName = "ModelScope";
 
+  /**
+   * Provider 能力描述
+   */
   readonly capabilities: ProviderCapabilities = {
-    textToImage: true,
-    imageToImage: true,
-    multiImageFusion: true,
-    asyncTask: true,
-    maxInputImages: 10,
-    outputFormats: ["url", "b64_json"],
+    textToImage: true,      // 支持文生图
+    imageToImage: true,     // 支持图生图
+    multiImageFusion: true, // 支持多图融合
+    asyncTask: true,        // 必须使用异步轮询
+    maxInputImages: 10,     // 支持较多输入图片
+    outputFormats: ["url", "b64_json"], // 支持 URL 和 Base64 输出
   };
 
+  /**
+   * Provider 配置信息
+   */
   readonly config: ProviderConfig = {
     apiUrl: ModelScopeConfig.apiUrl,
     supportedModels: ModelScopeConfig.supportedModels,
@@ -51,10 +70,23 @@ export class ModelScopeProvider extends BaseProvider {
     defaultEditSize: ModelScopeConfig.defaultEditSize,
   };
 
+  /**
+   * 检测 API Key 是否属于 ModelScope
+   * 通常以 "ms-" 开头
+   */
   override detectApiKey(apiKey: string): boolean {
     return apiKey.startsWith("ms-");
   }
 
+  /**
+   * 执行图片生成请求
+   * 
+   * 处理流程：
+   * 1. 准备请求数据（处理输入图片，上传到图床）。
+   * 2. 提交异步任务。
+   * 3. 轮询任务状态直到完成。
+   * 4. 下载结果图片并转换为 Base64。
+   */
   override async generate(
     apiKey: string,
     request: ImageGenerationRequest,
@@ -70,7 +102,7 @@ export class ModelScopeProvider extends BaseProvider {
     logFullPrompt("ModelScope", requestId, prompt);
     if (hasImages) logInputImages("ModelScope", requestId, images);
 
-    // 智能选择模型
+    // 1. 智能选择模型和尺寸
     const model = this.selectModel(request.model, hasImages);
     const size = this.selectSize(request.size, hasImages);
 
@@ -100,6 +132,9 @@ export class ModelScopeProvider extends BaseProvider {
       requestBody.n = 1;
     }
 
+    // 2. 处理输入图片
+    // ModelScope API 需要公网可访问的图片 URL，不支持直接传 Base64。
+    // 如果输入是 Base64，需要先上传到图床。
     if (hasImages) {
       const urlImages: string[] = [];
       for (let i = 0; i < images.length; i++) {
@@ -144,12 +179,13 @@ export class ModelScopeProvider extends BaseProvider {
             headers: {
               "Content-Type": "application/json",
               "Authorization": `Bearer ${apiKey}`,
-              "X-ModelScope-Async-Mode": "true",
+              "X-ModelScope-Async-Mode": "true", // 强制启用异步模式
             },
             body: JSON.stringify(body),
           }),
       );
 
+    // 3. 提交任务
     const submitResponse = await submit(requestBody);
     if (!submitResponse.ok) {
       const errorText = await submitResponse.text();
@@ -177,11 +213,12 @@ export class ModelScopeProvider extends BaseProvider {
 
     info("ModelScope", `任务已提交, Task ID: ${taskId}`);
 
-    // 轮询任务状态
+    // 4. 轮询任务状态
     const maxAttempts = 120; // 10分钟超时 (120次 × 5秒)
     let pollingAttempts = 0;
     let invalidResponseStreak = 0;
 
+    // 辅助函数：标准化任务数据
     const normalizeTaskData = (raw: unknown): Record<string, unknown> | null => {
       if (!raw || typeof raw !== "object") return null;
       const r = raw as Record<string, unknown>;
@@ -200,6 +237,7 @@ export class ModelScopeProvider extends BaseProvider {
       return null;
     };
 
+    // 辅助函数：提取输出图片 URL
     const extractOutputImages = (data: Record<string, unknown>): string[] => {
       const direct = data.output_images;
       if (Array.isArray(direct)) {
@@ -262,6 +300,7 @@ export class ModelScopeProvider extends BaseProvider {
       return normalized;
     };
 
+    // 轮询循环
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise((resolve) => setTimeout(resolve, 5000));
       pollingAttempts++;
@@ -312,7 +351,7 @@ export class ModelScopeProvider extends BaseProvider {
         const imageCount = outputImageUrls.length;
         logImageGenerationComplete("ModelScope", requestId, imageCount, duration);
 
-        // 转换为 Base64 实现永久保存
+        // 5. 转换为 Base64 实现永久保存
         const results: Array<{ url?: string; b64_json?: string }> = [];
         for (const url of outputImageUrls) {
           info("ModelScope", `📎 原始图片 URL: ${url}`);

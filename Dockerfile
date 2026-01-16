@@ -7,6 +7,7 @@ COPY deno.lock .
 
 # 复制源代码目录
 COPY src/ ./src/
+COPY web/ ./web/
 
 # 缓存依赖
 RUN deno cache src/main.ts

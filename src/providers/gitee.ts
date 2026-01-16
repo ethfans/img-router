@@ -1,7 +1,12 @@
 /**
  * Gitee（模力方舟）Provider 实现
  *
- * 支持文生图、图片编辑（同步）、图片编辑（异步）三种模式
+ * 基于 Gitee AI 平台 API 实现。
+ * 支持文生图、图片编辑（同步）、图片编辑（异步）三种模式。
+ * 特点：
+ * 1. 使用特定格式的 API Key (30-60 位字母数字)。
+ * 2. 支持异步任务轮询机制，适合处理耗时较长的生成任务。
+ * 3. 区分同步和异步的编辑模型。
  */
 
 import {
@@ -11,7 +16,7 @@ import {
   type ProviderConfig,
 } from "./base.ts";
 import type { GenerationResult, ImageData, ImageGenerationRequest } from "../types/index.ts";
-import { GiteeConfig } from "../config/index.ts";
+import { GiteeConfig } from "../config/manager.ts";
 import { fetchWithTimeout, urlToBase64 } from "../utils/index.ts";
 import { parseErrorMessage } from "../core/error-handler.ts";
 import {
@@ -28,34 +33,66 @@ import { withApiTiming } from "../middleware/timing.ts";
 
 /**
  * Gitee Provider 实现类
+ * 
+ * 封装了 Gitee AI 平台的文生图和图生图接口。
+ * 根据模型类型自动选择同步或异步处理流程。
  */
 export class GiteeProvider extends BaseProvider {
+  /** Provider 名称标识 */
   readonly name = "Gitee" as const;
 
+  /**
+   * Provider 能力描述
+   */
   readonly capabilities: ProviderCapabilities = {
-    textToImage: true,
-    imageToImage: true,
-    multiImageFusion: true,
-    asyncTask: true,
-    maxInputImages: 5,
-    outputFormats: ["url", "b64_json"],
+    textToImage: true,      // 支持文生图
+    imageToImage: true,     // 支持图生图
+    multiImageFusion: true, // 支持多图融合
+    asyncTask: true,        // 支持异步任务（轮询）
+    maxInputImages: 5,      // 最多支持 5 张输入图片
+    outputFormats: ["url", "b64_json"], // 支持 URL 和 Base64 输出
   };
 
+  /**
+   * Provider 配置信息
+   */
   readonly config: ProviderConfig = {
     apiUrl: GiteeConfig.apiUrl,
     supportedModels: GiteeConfig.supportedModels,
     defaultModel: GiteeConfig.defaultModel,
     defaultSize: GiteeConfig.defaultSize,
-    editModels: [...GiteeConfig.editModels, ...GiteeConfig.asyncEditModels],
+    editModels: [...GiteeConfig.editModels, ...GiteeConfig.asyncEditModels], // 合并同步和异步编辑模型
     defaultEditModel: GiteeConfig.defaultEditModel,
     defaultEditSize: GiteeConfig.defaultEditSize,
   };
 
+  /**
+   * 检测 API Key 是否属于 Gitee
+   * Gitee API Key 通常是 30-60 位的字母数字组合
+   *
+   * @param apiKey - 待检测的 API Key
+   * @returns 如果格式匹配返回 true，否则返回 false
+   */
   override detectApiKey(apiKey: string): boolean {
     const giteeRegex = /^[a-zA-Z0-9]{30,60}$/;
     return giteeRegex.test(apiKey);
   }
 
+  /**
+   * 执行图片生成请求
+   * 
+   * 处理流程：
+   * 1. 解析模型别名。
+   * 2. 根据请求类型（文生图 vs 图生图）和模型特性（同步 vs 异步）分发到不同的处理方法。
+   *    - 文生图 -> handleTextToImage
+   *    - 图生图 (同步模型) -> handleSyncEdit
+   *    - 图生图 (异步模型) -> handleAsyncEdit
+   *
+   * @param apiKey - 认证密钥
+   * @param request - 图片生成请求对象
+   * @param options - 生成选项
+   * @returns 生成结果 Promise
+   */
   override async generate(
     apiKey: string,
     request: ImageGenerationRequest,
@@ -80,6 +117,7 @@ export class GiteeProvider extends BaseProvider {
 
     try {
       if (hasImages) {
+        // 检查是否为异步编辑模型
         const isAsyncModel = normalizedRequest.model &&
           GiteeConfig.asyncEditModels.includes(normalizedRequest.model);
 
@@ -103,12 +141,20 @@ export class GiteeProvider extends BaseProvider {
     }
   }
 
+  /**
+   * 解析模型别名
+   * 处理特定场景下的模型名称映射，例如将通用的 "Qwen-Image-Edit" 映射到具体的异步模型。
+   */
   private resolveModelAlias(model: string | undefined, hasImages: boolean): string | undefined {
     if (!model) return model;
     if (hasImages && model === "Qwen-Image-Edit") return GiteeConfig.defaultAsyncEditModel;
     return model;
   }
 
+  /**
+   * 处理文生图请求
+   * 使用同步 JSON API。
+   */
   private async handleTextToImage(
     apiKey: string,
     request: ImageGenerationRequest,
@@ -171,6 +217,10 @@ export class GiteeProvider extends BaseProvider {
     };
   }
 
+  /**
+   * 处理同步图生图请求
+   * 使用 FormData 格式上传图片和参数。
+   */
   private async handleSyncEdit(
     apiKey: string,
     request: ImageGenerationRequest,
@@ -189,6 +239,7 @@ export class GiteeProvider extends BaseProvider {
     formData.append("size", GiteeConfig.defaultEditSize);
     formData.append("n", "1");
 
+    // 处理输入图片：支持 Base64 和 URL
     for (let i = 0; i < request.images.length; i++) {
       const imageInput = request.images[i];
       let base64Data: string;
@@ -249,6 +300,14 @@ export class GiteeProvider extends BaseProvider {
     };
   }
 
+  /**
+   * 处理异步图生图请求
+   * 
+   * 流程：
+   * 1. 提交任务 (Submit Task)。
+   * 2. 获取 Task ID。
+   * 3. 轮询任务状态 (Poll Status)，直到成功或失败。
+   */
   private async handleAsyncEdit(
     apiKey: string,
     request: ImageGenerationRequest,
@@ -261,6 +320,7 @@ export class GiteeProvider extends BaseProvider {
     logImageGenerationStart("Gitee", options.requestId, model, asyncSize, request.prompt.length);
     info("Gitee", `使用图片编辑（异步）模式, 模型: ${model}, 图片数量: ${request.images.length}`);
 
+    // 1. 提交任务
     const formData = new FormData();
     formData.append("model", model);
     formData.append("prompt", request.prompt || "");
@@ -314,6 +374,7 @@ export class GiteeProvider extends BaseProvider {
 
     info("Gitee", `异步任务已提交, Task ID: ${taskId}`);
 
+    // 2. 轮询任务状态
     const maxAttempts = 60;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -333,6 +394,7 @@ export class GiteeProvider extends BaseProvider {
         const imageData: ImageData[] = [];
         const output = statusData.output ?? statusData.data;
 
+        // 解析不同格式的输出结果
         if (output?.file_url) {
           imageData.push({ url: output.file_url });
         } else if (output?.url) {
@@ -380,6 +442,10 @@ export class GiteeProvider extends BaseProvider {
     throw new Error("Gitee 异步任务超时");
   }
 
+  /**
+   * 将图片数据中的 URL 转换为 Base64
+   * 确保生成的图片可以永久保存，不依赖临时 URL。
+   */
   private async convertUrlsToBase64(imageData: ImageData[]): Promise<ImageData[]> {
     const results: ImageData[] = [];
 

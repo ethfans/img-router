@@ -1,7 +1,12 @@
 /**
  * Pollinations Provider 实现
  *
- * 支持文生图和图生图功能，使用 GET 端点
+ * 基于 Pollinations.ai 免费 API 实现。
+ * 支持文生图和图生图功能，使用简单的 GET 请求模式。
+ * 特点：
+ * 1. 无需注册，完全免费。
+ * 2. 接口简单，通过 URL 参数控制生成选项。
+ * 3. 图生图需要将图片 URL 作为参数传递。
  */
 
 import { encodeBase64 } from "@std/encoding/base64";
@@ -12,7 +17,8 @@ import {
   type ProviderConfig,
 } from "./base.ts";
 import type { GenerationResult, ImageData, ImageGenerationRequest } from "../types/index.ts";
-import { API_TIMEOUT_MS, ImageBedConfig, PollinationsConfig } from "../config/index.ts";
+import { API_TIMEOUT_MS, IMAGE_BED_CONFIG as ImageBedConfig, PollinationsConfig } from "../config/manager.ts";
+import { getProviderTaskDefaults } from "../config/manager.ts";
 import { fetchWithTimeout } from "../utils/http.ts";
 import { error, info, warn } from "../core/logger.ts";
 import { parseErrorMessage } from "../core/error-handler.ts";
@@ -28,6 +34,12 @@ import { withApiTiming } from "../middleware/timing.ts";
 
 /**
  * 根据图片魔数检测 MIME 类型
+ * 
+ * 通过读取二进制数据的前几个字节（Magic Number）来准确判断图片格式。
+ * 支持 PNG, JPEG, GIF, WEBP, BMP。
+ *
+ * @param uint8Array - 图片二进制数据
+ * @returns MIME 类型字符串，若无法识别返回 null
  */
 function detectImageMimeType(uint8Array: Uint8Array): string | null {
   if (uint8Array.length < 4) return null;
@@ -53,7 +65,13 @@ function detectImageMimeType(uint8Array: Uint8Array): string | null {
 }
 
 /**
- * 将Base64 图片上传到图床获取 URL
+ * 将 Base64 图片上传到图床获取 URL
+ * 
+ * Pollinations 的图生图接口需要图片 URL。
+ * 如果输入是 Base64，此函数将其上传到配置的图床（如 EasyImage）以获取可用的 URL。
+ *
+ * @param base64Data - Base64 格式的图片数据
+ * @returns 图片的 HTTP URL
  */
 async function uploadBase64ToImageBed(base64Data: string): Promise<string> {
   let base64Content: string;
@@ -122,20 +140,30 @@ async function uploadBase64ToImageBed(base64Data: string): Promise<string> {
 }
 
 /**
- * Pollinations Provider
+ * Pollinations Provider 实现类
+ * 
+ * 封装了 Pollinations.ai 的调用逻辑。
+ * 主要处理 URL 参数的构建和返回的二进制图片数据的解析。
  */
 export class PollinationsProvider extends BaseProvider {
+  /** Provider 名称标识 */
   readonly name = "Pollinations" as const;
 
+  /**
+   * Provider 能力描述
+   */
   readonly capabilities: ProviderCapabilities = {
-    textToImage: true,
-    imageToImage: true,
-    multiImageFusion: true,
-    asyncTask: false,
-    maxInputImages: 3,
-    outputFormats: ["b64_json"],
+    textToImage: true,      // 支持文生图
+    imageToImage: true,     // 支持图生图
+    multiImageFusion: true, // 支持多图融合（通过拼接 URL）
+    asyncTask: false,       // 同步返回结果
+    maxInputImages: 3,      // 限制输入图片数量
+    outputFormats: ["b64_json"], // 仅支持 Base64 输出（因为接口直接返回图片流）
   };
 
+  /**
+   * Provider 配置信息
+   */
   readonly config: ProviderConfig = {
     apiUrl: PollinationsConfig.apiUrl,
     supportedModels: PollinationsConfig.supportedModels,
@@ -146,10 +174,17 @@ export class PollinationsProvider extends BaseProvider {
     defaultEditSize: PollinationsConfig.defaultEditSize,
   };
 
+  /**
+   * 检测 API Key 是否属于 Pollinations
+   * 实际上 Pollinations 不需要 Key，但为了兼容性，支持以 pk_ 或 sk_ 开头的伪 Key
+   */
   override detectApiKey(apiKey: string): boolean {
     return apiKey.startsWith("pk_") || apiKey.startsWith("sk_");
   }
 
+  /**
+   * 执行图片生成请求
+   */
   override async generate(
     apiKey: string,
     request: ImageGenerationRequest,
@@ -213,6 +248,11 @@ export class PollinationsProvider extends BaseProvider {
     }
   }
 
+  /**
+   * 处理文生图请求
+   * 
+   * 构建 GET 请求 URL，将 Prompt 和参数（模型、尺寸、Seed 等）编码到 URL 中。
+   */
   private async textToImage(
     apiKey: string,
     prompt: string,
@@ -231,8 +271,9 @@ export class PollinationsProvider extends BaseProvider {
     });
 
     if (PollinationsConfig.seed !== undefined) params.set("seed", String(PollinationsConfig.seed));
-    if (PollinationsConfig.quality !== undefined) {
-      params.set("quality", String(PollinationsConfig.quality));
+    const q = getProviderTaskDefaults(this.name, "text").quality ?? PollinationsConfig.quality;
+    if (q !== undefined) {
+      params.set("quality", String(q));
     }
     if (PollinationsConfig.transparent) params.set("transparent", "true");
     if (PollinationsConfig.guidanceScale !== undefined) {
@@ -287,6 +328,13 @@ export class PollinationsProvider extends BaseProvider {
     return `data:${mimeType};base64,${base64}`;
   }
 
+  /**
+   * 处理图生图请求
+   * 
+   * 1. 检查模型是否支持编辑。
+   * 2. 将 Base64 图片上传到图床。
+   * 3. 构建包含图片 URL 的 GET 请求。
+   */
   private async imageEdit(
     apiKey: string,
     prompt: string,
@@ -295,7 +343,7 @@ export class PollinationsProvider extends BaseProvider {
     size: string,
   ): Promise<string> {
     let actualModel = model;
-    if (!PollinationsConfig.editModels.includes(model)) {
+    if (!PollinationsConfig.editModels?.includes(model)) {
       info(
         "Pollinations",
         `模型 ${model} 不支持图生图，切换到 ${PollinationsConfig.defaultEditModel}`,
@@ -347,8 +395,9 @@ export class PollinationsProvider extends BaseProvider {
     });
 
     if (PollinationsConfig.seed !== undefined) params.set("seed", String(PollinationsConfig.seed));
-    if (PollinationsConfig.quality !== undefined) {
-      params.set("quality", String(PollinationsConfig.quality));
+    const q = getProviderTaskDefaults(this.name, "edit").quality ?? PollinationsConfig.quality;
+    if (q !== undefined) {
+      params.set("quality", String(q));
     }
     if (PollinationsConfig.transparent) params.set("transparent", "true");
     if (PollinationsConfig.guidanceScale !== undefined) {

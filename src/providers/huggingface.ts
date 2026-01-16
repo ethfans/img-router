@@ -1,6 +1,12 @@
 /**
  * HuggingFace Provider 实现
- * 支持文生图和图生图（Gradio API），多 URL 故障转移
+ *
+ * 基于 Hugging Face Gradio API 实现。
+ * 支持文生图和图生图功能。
+ * 特点：
+ * 1. 使用 Gradio 的 SSE (Server-Sent Events) 协议与 API 交互。
+ * 2. 支持多 URL 故障转移 (Failover) 机制，提高服务可用性。
+ * 3. 实现了复杂的 Prompt 清洗和 SSE 数据解析逻辑。
  */
 
 import {
@@ -11,7 +17,7 @@ import {
   type ProviderName,
 } from "./base.ts";
 import type { GenerationResult, ImageGenerationRequest } from "../types/index.ts";
-import { HuggingFaceConfig } from "../config/index.ts";
+import { HuggingFaceConfig } from "../config/manager.ts";
 import { fetchWithTimeout } from "../utils/index.ts";
 import { urlToBase64 } from "../utils/image.ts";
 import {
@@ -28,7 +34,13 @@ import {
 } from "../core/logger.ts";
 import { withApiTiming } from "../middleware/timing.ts";
 
-/** 将图片（URL 或 Base64）转换为 Blob 对象 */
+/** 
+ * 将图片（URL 或 Base64）转换为 Blob 对象
+ * 用于上传到 Gradio 服务器。
+ *
+ * @param imageSource - 图片源字符串（Data URI 或 HTTP URL）
+ * @returns Blob 对象 Promise
+ */
 async function imageToBlob(imageSource: string): Promise<Blob> {
   if (imageSource.startsWith("data:image/")) {
     const parts = imageSource.split(",");
@@ -41,12 +53,16 @@ async function imageToBlob(imageSource: string): Promise<Blob> {
     if (!response.ok) throw new Error(`下载图片失败: ${response.status}`);
     return await response.blob();
   } else {
+    // 假设是纯 Base64 字符串，默认为 PNG
     const binaryData = Uint8Array.from(atob(imageSource), (c) => c.charCodeAt(0));
     return new Blob([binaryData], { type: "image/png" });
   }
 }
 
-/** 简单的 Prompt 清洗函数 */
+/** 
+ * 简单的 Prompt 清洗函数 
+ * 去除可能导致 Gradio 接口报错的控制字符。
+ */
 function sanitizePrompt(prompt: string): string {
   // 替换所有控制字符（0-31 和 127）为空格，然后去除首尾空格
   // 这可以解决由于换行符、制表符等导致的 Gradio 错误
@@ -54,7 +70,14 @@ function sanitizePrompt(prompt: string): string {
   return prompt.replace(/[\x00-\x1F\x7F]/g, " ").trim();
 }
 
-/** 从 SSE 流中提取图片 URL */
+/** 
+ * 从 SSE 流中提取图片 URL
+ * 解析 Gradio 协议的 SSE 数据流，查找生成的图片路径。
+ *
+ * @param sseStream - SSE 响应文本
+ * @param baseUrl - API 基础 URL，用于拼接相对路径
+ * @returns 提取到的完整图片 URL，若未找到返回 null
+ */
 function extractImageUrlFromSSE(sseStream: string, baseUrl?: string): string | null {
   const lines = sseStream.split("\n");
   let isCompleteEvent = false;
@@ -97,13 +120,16 @@ function extractImageUrlFromSSE(sseStream: string, baseUrl?: string): string | n
         try {
           const data = JSON.parse(jsonData);
           if (data && data[0]) {
+            // 情况 1: 返回对象包含 url 属性
             if (typeof data[0] === "object" && data[0].url) {
               info("HuggingFace", `从 SSE 提取到图片 URL: ${data[0].url.substring(0, 80)}...`);
               return data[0].url;
             }
+            // 情况 2: 返回字符串路径
             if (typeof data[0] === "string") {
               const imagePath = data[0];
               let finalUrl = imagePath;
+              // 处理相对路径
               if (imagePath.startsWith("/") && baseUrl) {
                 finalUrl = `${baseUrl}/gradio_api/file=${imagePath}`;
               } else if (!imagePath.startsWith("http") && baseUrl) {
@@ -125,18 +151,31 @@ function extractImageUrlFromSSE(sseStream: string, baseUrl?: string): string | n
   return null;
 }
 
+/**
+ * HuggingFace Provider 实现类
+ * 
+ * 封装了对 Hugging Face Space 上 Gradio 应用的调用。
+ * 核心功能是管理多个 API URL 的故障转移。
+ */
 export class HuggingFaceProvider extends BaseProvider {
+  /** Provider 名称标识 */
   readonly name: ProviderName = "HuggingFace";
 
+  /**
+   * Provider 能力描述
+   */
   readonly capabilities: ProviderCapabilities = {
-    textToImage: true,
-    imageToImage: true,
-    multiImageFusion: true,
-    asyncTask: true,
-    maxInputImages: 3,
-    outputFormats: ["url", "b64_json"],
+    textToImage: true,      // 支持文生图
+    imageToImage: true,     // 支持图生图
+    multiImageFusion: true, // 支持多图融合
+    asyncTask: true,        // 实际上是长连接等待，被视为异步
+    maxInputImages: 3,      // 最多支持 3 张输入图片
+    outputFormats: ["url", "b64_json"], // 支持 URL 和 Base64 输出
   };
 
+  /**
+   * Provider 配置信息
+   */
   readonly config: ProviderConfig = {
     apiUrl: HuggingFaceConfig.apiUrls[0] || "",
     supportedModels: HuggingFaceConfig.supportedModels,
@@ -147,10 +186,19 @@ export class HuggingFaceProvider extends BaseProvider {
     defaultEditSize: HuggingFaceConfig.defaultEditSize,
   };
 
+  /**
+   * 检测 API Key 是否属于 HuggingFace
+   * 通常以 "hf_" 开头
+   */
   override detectApiKey(apiKey: string): boolean {
     return apiKey.startsWith("hf_");
   }
 
+  /**
+   * 执行图片生成请求
+   * 
+   * 根据是否有输入图片，分发到文生图或图生图处理逻辑。
+   */
   override async generate(
     apiKey: string,
     request: ImageGenerationRequest,
@@ -178,6 +226,13 @@ export class HuggingFaceProvider extends BaseProvider {
     }
   }
 
+  /**
+   * 处理文生图请求
+   * 
+   * 特性：
+   * 1. 遍历配置的 API URL 列表进行尝试（故障转移）。
+   * 2. 提交任务 -> 获取 Event ID -> 获取结果 (SSE)。
+   */
   private async generateTextToImage(
     request: ImageGenerationRequest,
     options: GenerationOptions,
@@ -199,6 +254,7 @@ export class HuggingFaceProvider extends BaseProvider {
     }
 
     const [defaultWidth, defaultHeight] = HuggingFaceConfig.defaultSize.split("x").map(Number);
+    // Gradio API 的参数数组
     const requestBody = JSON.stringify({
       data: [prompt, height || defaultHeight, width || defaultWidth, 9, seed, false],
     });
@@ -220,6 +276,7 @@ export class HuggingFaceProvider extends BaseProvider {
 
     let lastError: Error | null = null;
 
+    // 故障转移循环
     for (let i = 0; i < apiUrls.length; i++) {
       const apiUrl = apiUrls[i];
       const isLastAttempt = i === apiUrls.length - 1;
@@ -227,6 +284,7 @@ export class HuggingFaceProvider extends BaseProvider {
       info("HuggingFace", `尝试文生图 URL [${i + 1}/${apiUrls.length}]: ${apiUrl}`);
 
       try {
+        // 1. 提交任务到队列
         const queueResponse = await withApiTiming(
           "HuggingFace",
           "generate_image",
@@ -246,6 +304,7 @@ export class HuggingFaceProvider extends BaseProvider {
         const { event_id } = await queueResponse.json();
         info("HuggingFace", `文生图任务已提交, Event ID: ${event_id}`);
 
+        // 2. 获取任务结果（返回 SSE 流）
         const resultResponse = await fetchWithTimeout(
           `${apiUrl}/gradio_api/call/generate_image/${event_id}`,
           {
@@ -259,6 +318,7 @@ export class HuggingFaceProvider extends BaseProvider {
           throw new Error(`Result API Error (${resultResponse.status}): ${errorText}`);
         }
 
+        // 3. 解析 SSE 流获取图片 URL
         const sseText = await resultResponse.text();
         const imageUrl = extractImageUrlFromSSE(sseText, apiUrl);
 
@@ -266,6 +326,7 @@ export class HuggingFaceProvider extends BaseProvider {
 
         info("HuggingFace", `📎 原始图片 URL: ${imageUrl}`);
 
+        // 4. 将结果转换为 Base64
         let result: Array<{ url?: string; b64_json?: string }>;
         try {
           const { base64, mimeType } = await urlToBase64(imageUrl);
@@ -303,6 +364,14 @@ export class HuggingFaceProvider extends BaseProvider {
     return { success: false, error: errMsg, duration: Date.now() - startTime };
   }
 
+  /**
+   * 处理图生图请求
+   * 
+   * 特性：
+   * 1. 同样支持多 URL 故障转移。
+   * 2. 需要先将图片上传到 Gradio 服务器，获取内部路径。
+   * 3. 调用 /infer 端点进行生成。
+   */
   private async generateImageToImage(
     apiKey: string,
     request: ImageGenerationRequest,
@@ -363,6 +432,7 @@ export class HuggingFaceProvider extends BaseProvider {
 
     let lastError: Error | null = null;
 
+    // 故障转移循环
     for (let i = 0; i < editApiUrls.length; i++) {
       const apiUrl = editApiUrls[i];
       const isLastAttempt = i === editApiUrls.length - 1;
@@ -370,7 +440,7 @@ export class HuggingFaceProvider extends BaseProvider {
       info("HuggingFace", `尝试图生图 URL [${i + 1}/${editApiUrls.length}]: ${apiUrl}`);
 
       try {
-        // 上传图片到 Gradio 服务器
+        // 1. 上传图片到 Gradio 服务器
         const uploadedFiles: (string | null)[] = [null, null, null];
 
         for (let j = 0; j < 3; j++) {
@@ -399,6 +469,7 @@ export class HuggingFaceProvider extends BaseProvider {
           Number,
         );
 
+        // 2. 构造推理请求
         const inferRequest = {
           data: [
             uploadedFiles[0]
@@ -422,6 +493,7 @@ export class HuggingFaceProvider extends BaseProvider {
 
         info("HuggingFace", `正在调用 /infer 端点...`);
 
+        // 3. 提交推理任务
         const queueResponse = await withApiTiming(
           "HuggingFace",
           "image_edit",
@@ -441,6 +513,7 @@ export class HuggingFaceProvider extends BaseProvider {
         const { event_id } = await queueResponse.json();
         info("HuggingFace", `图生图任务已提交, Event ID: ${event_id}`);
 
+        // 4. 获取结果 (SSE)
         const resultResponse = await fetchWithTimeout(
           `${apiUrl}/gradio_api/call/infer/${event_id}`,
           {
@@ -461,6 +534,7 @@ export class HuggingFaceProvider extends BaseProvider {
 
         info("HuggingFace", `📎 原始图片 URL: ${imageUrl}`);
 
+        // 5. 将结果转换为 Base64
         let result: Array<{ url?: string; b64_json?: string }>;
         try {
           const { base64, mimeType } = await urlToBase64(imageUrl);

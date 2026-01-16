@@ -1,31 +1,33 @@
 /**
- * 通用错误处理模块 - 为所有图片生成提供商提供友好的错误信息
- *
- * 从根目录迁移到 src/core/ 作为核心基础设施
+ * @fileoverview 通用错误处理模块
+ * 为所有图片生成提供商提供统一、友好的错误信息处理机制。
+ * 该模块从根目录迁移至 src/core/，作为系统的核心基础设施之一。
  */
 
 /**
- * 错误类型定义
+ * 错误类型枚举
+ * 定义了系统可能遇到的各类错误代码
  */
 export enum ErrorType {
-  /** 内容审核失败 */
+  /** 内容审核未通过（被安全策略拦截） */
   MODERATION_BLOCKED = "moderation_blocked",
-  /** 请求参数错误 */
+  /** 请求参数错误（如提示词无效、格式不支持） */
   BAD_REQUEST = "bad_request",
-  /** 服务器内部错误 */
+  /** 服务器内部错误（上游服务故障或本地处理异常） */
   INTERNAL_ERROR = "internal_error",
-  /** 超时错误 */
+  /** 请求超时 */
   TIMEOUT = "timeout",
-  /** API Key 不可用 */
+  /** 无可用的 API 密钥 */
   NO_AVAILABLE_KEY = "no_available_key",
-  /** 速率限制已超出 */
+  /** 速率限制已超出（触发流控） */
   RATE_LIMIT = "rate_limit",
   /** 未知错误 */
   UNKNOWN = "unknown",
 }
 
 /**
- * 错误关键词匹配规则
+ * 错误关键词匹配规则配置
+ * 用于根据错误信息文本自动归类错误类型
  */
 const ERROR_PATTERNS = {
   // 内容审核相关关键词
@@ -79,7 +81,7 @@ const ERROR_PATTERNS = {
     "密钥不可用",
   ],
 
-  // 数据库错误相关关键词
+  // 数据库错误相关关键词（通常归类为内部错误）
   databaseError: [
     "failed query",
     "database error",
@@ -91,7 +93,7 @@ const ERROR_PATTERNS = {
 };
 
 /**
- * 友好的错误提示信息
+ * 用户友好的错误提示信息映射表
  */
 const FRIENDLY_MESSAGES: Record<ErrorType, string> = {
   [ErrorType.MODERATION_BLOCKED]:
@@ -100,12 +102,16 @@ const FRIENDLY_MESSAGES: Record<ErrorType, string> = {
   [ErrorType.INTERNAL_ERROR]: "服务提供商内部错误：服务暂时不可用，请稍后重试或更换其他模型。",
   [ErrorType.TIMEOUT]: "请求超时：服务器响应时间过长，请稍后重试。",
   [ErrorType.NO_AVAILABLE_KEY]: "API Key 不可用：当前没有可用的 API 密钥，请检查配置或稍后重试。",
-  [ErrorType.RATE_LIMIT]: "频繁 速率限制已超出：请求过于频繁，请稍后重试。",
+  [ErrorType.RATE_LIMIT]: "速率限制已超出：请求过于频繁，请稍后重试。",
   [ErrorType.UNKNOWN]: "图片生成失败：未知错误，请稍后重试。",
 };
 
 /**
  * 检测错误文本中是否包含特定关键词
+ * 
+ * @param {string} text - 待检测的错误文本
+ * @param {string[]} keywords - 关键词列表
+ * @returns {boolean} 如果包含任意一个关键词则返回 true
  */
 function containsKeywords(text: string, keywords: string[]): boolean {
   const lowerText = text.toLowerCase();
@@ -114,9 +120,16 @@ function containsKeywords(text: string, keywords: string[]): boolean {
 
 /**
  * 识别错误类型
+ * 根据错误文本内容和 HTTP 状态码判断具体的错误类型
+ * 
+ * @param {string} errorText - 错误描述文本
+ * @param {number} [statusCode] - HTTP 状态码（可选）
+ * @returns {ErrorType} 匹配到的错误类型
  */
 function identifyErrorType(errorText: string, statusCode?: number): ErrorType {
-  // 检查 API Key 不可用错误（特定错误优先级最高）
+  // 1. 优先检查特定错误关键词
+  
+  // 检查 API Key 不可用错误（优先级最高）
   if (containsKeywords(errorText, ERROR_PATTERNS.noAvailableKey)) {
     return ErrorType.NO_AVAILABLE_KEY;
   }
@@ -146,7 +159,7 @@ function identifyErrorType(errorText: string, statusCode?: number): ErrorType {
     return ErrorType.BAD_REQUEST;
   }
 
-  // 根据 HTTP 状态码判断
+  // 2. 如果关键词未匹配，则根据 HTTP 状态码判断
   if (statusCode) {
     if (statusCode === 400) {
       return ErrorType.BAD_REQUEST;
@@ -171,11 +184,12 @@ function identifyErrorType(errorText: string, statusCode?: number): ErrorType {
 
 /**
  * 解析并美化错误信息
+ * 将原始的、可能包含敏感信息或难以阅读的错误文本转换为简短、友好的提示信息。
  *
- * @param errorText - 原始错误文本（可能是 JSON 字符串或纯文本）
- * @param statusCode - HTTP 状态码（可选）
- * @param provider - 提供商名称（可选，用于日志）
- * @returns 友好的错误提示信息（保证简短，适合界面显示）
+ * @param {string} errorText - 原始错误文本（可能是 JSON 字符串或纯文本）
+ * @param {number} [statusCode] - HTTP 状态码（可选）
+ * @param {string} [provider] - 提供商名称（可选，用于日志前缀）
+ * @returns {string} 友好的错误提示信息（保证简短，适合界面显示）
  */
 export function parseErrorMessage(
   errorText: string,
@@ -255,10 +269,10 @@ export function parseErrorMessage(
 }
 
 /**
- * 为特定提供商创建错误处理函数
- *
- * @param provider - 提供商名称
- * @returns 错误处理函数
+ * 创建特定提供商的错误处理函数
+ * 
+ * @param {string} provider - 提供商名称
+ * @returns {Function} 错误处理闭包，接受状态码和错误文本
  */
 export function createErrorHandler(provider: string) {
   return (statusCode: number, errorText: string): string => {

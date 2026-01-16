@@ -37,3 +37,7 @@ npm-debug.log*
 
 .roomodes
 debug/
+test/
+docs/
+# Configuration
+config/config.yaml

@@ -16,6 +16,8 @@ services:
     # 如需启用，请在 Dockerfile 中安装 curl 或使用 Deno 的 fetch API
     volumes:
       - ./data:/app/data
+      - ./web:/app/web
+      - ./src:/app/src
 
 networks:
   default:
