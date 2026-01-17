@@ -2,7 +2,7 @@
  * Images Edit 端点处理器
  *
  * 处理 /v1/images/edits 端点（图生图/图片编辑）。
- * 
+ *
  * 功能特性：
  * - 支持 **multipart/form-data**：标准 OpenAI 风格，适合上传文件。
  * - 支持 **JSON**：兼容部分客户端，通过 Base64 或 URL 传递图片。
@@ -24,18 +24,12 @@ import type {
 } from "../types/index.ts";
 import { providerRegistry } from "../providers/registry.ts";
 import { buildDataUri, normalizeAndCompressInputImages, urlToBase64 } from "../utils/image.ts";
-import {
-  debug,
-  error,
-  generateRequestId,
-  info,
-  warn,
-} from "../core/logger.ts";
+import { debug, error, generateRequestId, info, warn } from "../core/logger.ts";
 import { extractPromptAndImages, normalizeMessageContent } from "./chat.ts";
 
 /**
  * 将 File 对象转换为 Data URI
- * 
+ *
  * 用于处理 multipart/form-data 上传的文件。
  *
  * @param file - 上传的文件对象
@@ -51,7 +45,7 @@ async function fileToDataUri(file: File): Promise<string> {
 
 /**
  * 处理 /v1/images/edits 端点
- * 
+ *
  * 核心流程：
  * 1. **鉴权与路由**：根据 API Key 检测 Provider。
  * 2. **请求解析**：
@@ -94,7 +88,7 @@ export async function handleImagesEdits(req: Request): Promise<Response> {
   }
 
   info("HTTP", `路由到 ${provider.name} (Images Edit)`);
-  
+
   const _startTime = Date.now();
 
   try {

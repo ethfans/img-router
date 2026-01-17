@@ -1,6 +1,6 @@
 /**
  * @fileoverview 核心日志模块
- * 
+ *
  * 提供全功能的日志服务，包括：
  * 1. 北京时间支持 (UTC+8)
  * 2. 文件持久化存储与轮转
@@ -14,7 +14,7 @@
 /** 北京时间偏移量 (UTC+8) */
 const BEIJING_TIMEZONE_OFFSET = 8 * 60 * 60 * 1000;
 
-/** 
+/**
  * 日志条目接口
  * 定义单条日志的数据结构
  */
@@ -37,7 +37,7 @@ type LogStreamCallback = (entry: LogEntry) => void;
 /** 当前活跃的 SSE 连接集合 */
 const activeStreams: Set<LogStreamCallback> = new Set();
 
-/** 
+/**
  * 最近日志签名缓存
  * 用于防止短时间内重复记录相同的日志（去重）
  */
@@ -45,7 +45,7 @@ const recentLogSignatures: Set<string> = new Set();
 /** 最大签名缓存数量 */
 const MAX_SIGNATURES = 1000;
 
-/** 
+/**
  * 最近日志缓存
  * 用于新建立连接时回显历史日志
  */
@@ -62,7 +62,7 @@ let lastFileSize = 0;
 
 /**
  * 生成日志唯一签名
- * 
+ *
  * @param {LogEntry} entry - 日志条目
  * @returns {string} 签名字符串
  */
@@ -73,7 +73,7 @@ function getLogSignature(entry: LogEntry): string {
 /**
  * 处理日志条目
  * 包括去重、缓存更新和实时推送
- * 
+ *
  * @param {LogEntry} entry - 日志条目
  * @param {boolean} isExternal - 是否来自外部文件监听（用于防止循环记录）
  */
@@ -82,9 +82,9 @@ function processLogEntry(entry: LogEntry, isExternal: boolean): void {
   const sig = getLogSignature(entry);
   if (isExternal && recentLogSignatures.has(sig)) {
     // 如果是外部文件读取的日志，且已经存在于签名缓存中（说明是我们自己写入的），则忽略
-    return; 
+    return;
   }
-  
+
   // 2. 更新签名缓存
   recentLogSignatures.add(sig);
   if (recentLogSignatures.size > MAX_SIGNATURES) {
@@ -108,7 +108,7 @@ function processLogEntry(entry: LogEntry, isExternal: boolean): void {
 
 /**
  * 获取最近的日志记录
- * 
+ *
  * @returns {LogEntry[]} 日志列表副本
  */
 export function getRecentLogs(): LogEntry[] {
@@ -118,7 +118,7 @@ export function getRecentLogs(): LogEntry[] {
 /**
  * 启动日志文件监听（模拟 `tail -f` 功能）
  * 当日志文件发生变化时，自动读取新增内容并推送到流
- * 
+ *
  * @param {string} path - 日志文件绝对路径
  */
 async function startFileWatcher(path: string): Promise<void> {
@@ -133,7 +133,7 @@ async function startFileWatcher(path: string): Promise<void> {
   }
 
   currentWatchPath = path;
-  
+
   try {
     // 获取初始文件大小
     const stat = await Deno.stat(path);
@@ -142,7 +142,7 @@ async function startFileWatcher(path: string): Promise<void> {
     // 开始监听文件变化
     // 注意：Windows 上 Deno.watchFs 对文件修改通常是有效的
     fileWatcher = Deno.watchFs(path);
-    
+
     // 异步处理文件变更事件
     (async () => {
       if (!fileWatcher) return;
@@ -152,7 +152,7 @@ async function startFileWatcher(path: string): Promise<void> {
         }
       }
     })();
-    
+
     info("Logger", `已启动日志文件监听: ${path}`);
   } catch (e) {
     // 文件可能还不存在，或者无法访问
@@ -166,7 +166,7 @@ async function startFileWatcher(path: string): Promise<void> {
 /**
  * 处理文件更新事件
  * 读取自上次检查以来的新增内容
- * 
+ *
  * @param {string} path - 文件路径
  */
 async function processFileUpdates(path: string): Promise<void> {
@@ -182,12 +182,12 @@ async function processFileUpdates(path: string): Promise<void> {
         const buf = new Uint8Array(newSize - lastFileSize);
         await file.read(buf);
         const text = new TextDecoder().decode(buf);
-        
+
         // 更新偏移量
         lastFileSize = newSize;
 
         // 解析并推送日志行
-        const lines = text.split('\n');
+        const lines = text.split("\n");
         for (const line of lines) {
           if (!line.trim()) continue;
           // 解析标准日志行格式: [TIMESTAMP] [LEVEL] [MODULE] MESSAGE
@@ -195,7 +195,7 @@ async function processFileUpdates(path: string): Promise<void> {
           const match = line.match(/^\[(.*?)\] \[(.*?)\] \[(.*?)\] (.*)$/);
           if (match) {
             const [_, timestamp, levelName, module, message] = match;
-            
+
             // 映射 LevelName 到 LogLevel 枚举
             let level = LogLevel.INFO;
             if (levelName === "DEBUG") level = LogLevel.DEBUG;
@@ -207,7 +207,7 @@ async function processFileUpdates(path: string): Promise<void> {
               level,
               levelName,
               module,
-              message
+              message,
             };
 
             // 处理外部日志（标记 isExternal = true）
@@ -225,7 +225,6 @@ async function processFileUpdates(path: string): Promise<void> {
     console.error(`[Logger] 读取文件更新失败: ${e}`);
   }
 }
-
 
 /**
  * 获取北京时间格式化字符串
@@ -283,7 +282,7 @@ let logFile: Deno.FsFile | null = null;
 
 /**
  * 核心日志写入函数
- * 
+ *
  * @param {number} level - 日志级别
  * @param {string} module - 模块名称
  * @param {string} message - 日志消息
@@ -357,7 +356,7 @@ export function error(module: string, message: string): void {
 /**
  * 配置日志模块
  * 允许在运行时更新日志配置
- * 
+ *
  * @param {Partial<LoggerConfig>} opts - 配置选项
  */
 export function configureLogger(opts: Partial<LoggerConfig>): void {
@@ -389,7 +388,7 @@ export async function initLogger(): Promise<void> {
     const encoder = new TextEncoder();
     const sep = "\n" + "=".repeat(50) + "\n";
     logFile.writeSync(encoder.encode(`${sep}[${getBeijingTimestamp()}] 启动${sep}`));
-    
+
     // 启动文件监听
     startFileWatcher(logPath);
   } catch {
@@ -424,7 +423,7 @@ export function closeLogger(): void {
 
 /**
  * 添加日志流监听者
- * 
+ *
  * @param {LogStreamCallback} callback - 接收日志条目的回调函数
  * @returns {Function} 取消订阅的函数
  */
@@ -451,10 +450,9 @@ export function generateRequestId(): string {
   return `req_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 8)}`;
 }
 
-
 /**
  * 记录 HTTP 请求结束日志
- * 
+ *
  * @param {string} requestId - 请求 ID
  * @param {string} method - HTTP 方法
  * @param {string} url - 请求 URL
@@ -477,16 +475,16 @@ export function logRequestEnd(
     // 彻底屏蔽高频/低价值请求的成功日志（如管理后台页面导航和配置轮询）
     // 这些日志在任何级别下（包括 DEBUG）都不记录，以保持日志流纯净
     const ignoredPaths = [
-      '/api/config',
-      '/api/key-pool',
-      '/favicon.ico',
-      '/admin',
-      '/setting',
-      '/channel',
-      '/keys'
+      "/api/config",
+      "/api/key-pool",
+      "/favicon.ico",
+      "/admin",
+      "/setting",
+      "/channel",
+      "/keys",
     ];
-    
-    if (ignoredPaths.some(p => url.startsWith(p)) || url === '/') {
+
+    if (ignoredPaths.some((p) => url.startsWith(p)) || url === "/") {
       return;
     }
 

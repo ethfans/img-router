@@ -13,19 +13,19 @@ import { handleChatCompletions } from "./handlers/chat.ts";
 import { handleImagesGenerations } from "./handlers/images.ts";
 import { handleImagesEdits } from "./handlers/edits.ts";
 import { handleImagesBlend } from "./handlers/blend.ts";
-import { warn, addLogStream, getRecentLogs, LogLevel, type LogEntry } from "./core/logger.ts";
+import { addLogStream, getRecentLogs, info, type LogEntry, LogLevel, warn } from "./core/logger.ts";
 import { type RequestContext, withLogging } from "./middleware/logging.ts";
 import * as Config from "./config/manager.ts";
-import { 
-  getRuntimeConfig, 
-  replaceRuntimeConfig, 
-  setProviderTaskDefaults, 
-  setProviderEnabled, 
-  getKeyPool, 
+import {
+  getKeyPool,
+  getRuntimeConfig,
+  replaceRuntimeConfig,
+  type RuntimeConfig,
+  type RuntimeProviderConfig,
+  setProviderEnabled,
+  setProviderTaskDefaults,
+  type SystemConfig,
   updateKeyPool,
-  type RuntimeConfig, 
-  type SystemConfig, 
-  type RuntimeProviderConfig 
 } from "./config/manager.ts";
 import { providerRegistry } from "./providers/registry.ts";
 import type { ProviderName } from "./providers/base.ts";
@@ -67,9 +67,9 @@ interface RuntimeConfigUpdatePayload {
   enabled?: boolean;
 }
 
-/** 
+/**
  * 鉴权中间件
- * 
+ *
  * 验证 Authorization Header 是否包含有效的 Global Access Key。
  * 仅当系统配置了 GLOBAL_ACCESS_KEY 时才生效。
  */
@@ -122,7 +122,7 @@ function handleMethodNotAllowed(method: string): Response {
  * 内部路由处理函数（带日志上下文）
  *
  * 这是实际的路由逻辑，由 withLogging 中间件包装。
- * 
+ *
  * 路由表：
  * - `/health`: 健康检查
  * - `/`: 系统信息
@@ -148,7 +148,9 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
   // 静态页面（SPA 路由）
   // 所有前端路由都返回 index.html，由前端 Router 处理页面显示
   const spaRoutes = ["/admin", "/setting", "/channel", "/keys", "/index", "/ui", "/", "/update"];
-  const spaPath = (pathname.length > 1 && pathname.endsWith("/")) ? pathname.slice(0, -1) : pathname;
+  const spaPath = (pathname.length > 1 && pathname.endsWith("/"))
+    ? pathname.slice(0, -1)
+    : pathname;
   if (spaRoutes.includes(spaPath) && method === "GET") {
     try {
       const html = await Deno.readTextFile("web/index.html");
@@ -169,8 +171,8 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
       const contentType = pathname.endsWith(".css")
         ? "text/css; charset=utf-8"
         : pathname.endsWith(".js")
-          ? "application/javascript; charset=utf-8"
-          : "text/plain";
+        ? "application/javascript; charset=utf-8"
+        : "text/plain";
       return new Response(content, {
         headers: { "Content-Type": contentType },
       });
@@ -182,14 +184,17 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
 
   // 系统信息 API
   if ((pathname === "/api/info" || pathname === "/api/info/") && method === "GET") {
-    return new Response(JSON.stringify({
-      service: "img-router",
-      version: denoConfig.version,
-      docs: "https://github.com/lianwusuoai/img-router",
-      ui: "/admin"
-    }), {
-      headers: { "Content-Type": "application/json" }
-    });
+    return new Response(
+      JSON.stringify({
+        service: "img-router",
+        version: denoConfig.version,
+        docs: "https://github.com/lianwusuoai/img-router",
+        ui: "/admin",
+      }),
+      {
+        headers: { "Content-Type": "application/json" },
+      },
+    );
   }
 
   // CORS 预检请求
@@ -206,7 +211,7 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
     if (!checkAuth(req) && !providerRegistry.isRecognizedApiKey(apiKey)) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
         status: 401,
-        headers: { "Content-Type": "application/json" }
+        headers: { "Content-Type": "application/json" },
       });
     }
   }
@@ -227,7 +232,9 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
         const encoder = new TextEncoder();
 
         // 发送初始连接消息
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "connected", level: levelParam })}\n\n`));
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify({ type: "connected", level: levelParam })}\n\n`),
+        );
 
         // 发送最近的历史日志
         const recentLogs = getRecentLogs();
@@ -299,7 +306,7 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
     case "/v1/images/blend":
       if (method !== "POST") return handleMethodNotAllowed(method);
       return await handleImagesBlend(req);
-    
+
     // 管理 API：系统配置
     case "/api/config":
       if (method === "GET") {
@@ -309,12 +316,15 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
           const isEnabled = providerRegistry.has(name);
 
           if (name === "Gitee") {
-            console.log("[API/Config] Gitee Config Snapshot:", JSON.stringify({
-              textModelsCount: p.config.textModels?.length,
-              editModelsCount: p.config.editModels?.length,
-              blendModelsCount: p.config.blendModels?.length,
-              firstTextModel: p.config.textModels?.[0]
-            }));
+            console.log(
+              "[API/Config] Gitee Config Snapshot:",
+              JSON.stringify({
+                textModelsCount: p.config.textModels?.length,
+                editModelsCount: p.config.editModels?.length,
+                blendModelsCount: p.config.blendModels?.length,
+                firstTextModel: p.config.textModels?.[0],
+              }),
+            );
           }
 
           return [{
@@ -334,164 +344,178 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
           }];
         });
 
-        return new Response(JSON.stringify({
-          version: denoConfig.version,
-          textModels: Config.ALL_TEXT_MODELS,
-          supportedSizes: Config.SUPPORTED_SIZES,
-          providers,
-          runtimeConfig: getRuntimeConfig(),
-          port: Config.PORT,
-          timeout: Config.API_TIMEOUT_MS,
-          maxBody: Config.MAX_REQUEST_BODY_SIZE,
-          defaultModel: Config.DEFAULT_IMAGE_MODEL,
-          defaultSize: Config.DEFAULT_IMAGE_SIZE,
-          defaultQuality: Config.DEFAULT_IMAGE_QUALITY,
-          doubaoConfigured: !!Config.DOUBAO_ACCESS_KEY || getKeyPool("Doubao").some(k => k.enabled),
-          giteeConfigured: !!Config.GITEE_AI_API_KEY || getKeyPool("Gitee").some(k => k.enabled),
-          modelscopeConfigured: !!Config.MODELSCOPE_API_KEY || getKeyPool("ModelScope").some(k => k.enabled),
-          hfConfigured: !!Config.HUGGINGFACE_API_KEY || getKeyPool("HuggingFace").some(k => k.enabled),
-          pollinationsConfigured: !!Config.POLLINATIONS_API_KEY || getKeyPool("Pollinations").some(k => k.enabled),
-          globalAccessKeyConfigured: !!Config.GLOBAL_ACCESS_KEY,
-          cors: Config.ENABLE_CORS,
-          logging: Config.ENABLE_REQUEST_LOGGING,
-          verboseLogging: Config.VERBOSE_LOGGING,
-          healthCheck: Config.ENABLE_HEALTH_CHECK
-        }), {
-          headers: { "Content-Type": "application/json" }
-        });
+        return new Response(
+          JSON.stringify({
+            version: denoConfig.version,
+            textModels: Config.ALL_TEXT_MODELS,
+            supportedSizes: Config.SUPPORTED_SIZES,
+            providers,
+            runtimeConfig: getRuntimeConfig(),
+            port: Config.PORT,
+            timeout: Config.API_TIMEOUT_MS,
+            maxBody: Config.MAX_REQUEST_BODY_SIZE,
+            defaultModel: Config.DEFAULT_IMAGE_MODEL,
+            defaultSize: Config.DEFAULT_IMAGE_SIZE,
+            defaultQuality: Config.DEFAULT_IMAGE_QUALITY,
+            doubaoConfigured: !!Config.DOUBAO_ACCESS_KEY ||
+              getKeyPool("Doubao").some((k) => k.enabled),
+            giteeConfigured: !!Config.GITEE_AI_API_KEY ||
+              getKeyPool("Gitee").some((k) => k.enabled),
+            modelscopeConfigured: !!Config.MODELSCOPE_API_KEY ||
+              getKeyPool("ModelScope").some((k) => k.enabled),
+            hfConfigured: !!Config.HUGGINGFACE_API_KEY ||
+              getKeyPool("HuggingFace").some((k) => k.enabled),
+            pollinationsConfigured: !!Config.POLLINATIONS_API_KEY ||
+              getKeyPool("Pollinations").some((k) => k.enabled),
+            globalAccessKeyConfigured: !!Config.GLOBAL_ACCESS_KEY,
+            cors: Config.ENABLE_CORS,
+            logging: Config.ENABLE_REQUEST_LOGGING,
+            verboseLogging: Config.VERBOSE_LOGGING,
+            healthCheck: Config.ENABLE_HEALTH_CHECK,
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+          },
+        );
       }
       return handleMethodNotAllowed(method);
-    
+
     // 管理 API：密钥池管理
     case "/api/key-pool":
       if (method === "GET") {
         const provider = ctx.url.searchParams.get("provider");
         if (!provider) {
-          return new Response(JSON.stringify({ error: "Missing provider param" }), { 
+          return new Response(JSON.stringify({ error: "Missing provider param" }), {
             status: 400,
-            headers: { "Content-Type": "application/json" }
+            headers: { "Content-Type": "application/json" },
           });
         }
         const pool = getKeyPool(provider);
         // Security: Mask keys in response
-        const safePool = pool.map(k => ({
+        const safePool = pool.map((k) => ({
           ...k,
-          key: k.key && k.key.length > 8 ? `${k.key.slice(0, 4)}...${k.key.slice(-4)}` : "********"
+          key: k.key && k.key.length > 8 ? `${k.key.slice(0, 4)}...${k.key.slice(-4)}` : "********",
         }));
         return new Response(JSON.stringify({ pool: safePool }), {
-          headers: { "Content-Type": "application/json" }
+          headers: { "Content-Type": "application/json" },
         });
       }
       if (method === "POST") {
         try {
           const body = await req.json() as KeyPoolUpdatePayload;
           const { provider, keyItem, action, id, keys, format } = body;
-          
+
           if (!provider) throw new Error("Missing provider");
 
           const pool = getKeyPool(provider);
           let newPool = [...pool];
 
           if (action === "add") {
-             if (!keyItem || !keyItem.key) throw new Error("Missing keyItem");
-             // Check duplicate
-             if (pool.some(k => k.key === keyItem.key)) throw new Error("Duplicate key");
-             newPool.push({
-                 id: crypto.randomUUID(),
-                 enabled: true,
-                 lastUsed: 0,
-                 addedAt: Date.now(),
-                 provider: provider,
-                 status: 'active',
-                 ...keyItem,
-                 key: keyItem.key, // Ensure key is set
-                 name: keyItem.name || "New Key", // Ensure name is set
-             });
+            if (!keyItem || !keyItem.key) throw new Error("Missing keyItem");
+            // Check duplicate
+            if (pool.some((k) => k.key === keyItem.key)) throw new Error("Duplicate key");
+            newPool.push({
+              id: crypto.randomUUID(),
+              enabled: true,
+              lastUsed: 0,
+              addedAt: Date.now(),
+              provider: provider,
+              status: "active",
+              ...keyItem,
+              key: keyItem.key, // Ensure key is set
+              name: keyItem.name || "New Key", // Ensure name is set
+            });
           } else if (action === "batch_add") {
-             if (!keys || typeof keys !== 'string') throw new Error("Missing keys string");
-             
-             let keyList: string[] = [];
-             const inputFormat = format || 'auto';
-             
-             if (inputFormat === 'csv') {
-               keyList = keys.split(',').map(k => k.trim()).filter(Boolean);
-             } else if (inputFormat === 'text') {
-               keyList = keys.split('\n').map(k => k.trim()).filter(Boolean);
-             } else { // auto
-               if (keys.includes('\n')) {
-                 keyList = keys.split('\n').map(k => k.trim()).filter(Boolean);
-               } else {
-                 keyList = keys.split(',').map(k => k.trim()).filter(Boolean);
-               }
-             }
-             
-             // Deduplicate input
-             keyList = [...new Set(keyList)];
-             
-             let addedCount = 0;
-             for (const k of keyList) {
-               // Skip if already exists in pool
-               if (pool.some(pk => pk.key === k)) continue;
-               
-               newPool.push({
-                 id: crypto.randomUUID(),
-                 key: k,
-                 name: `Imported Key ${k.slice(0, 8)}...`,
-                 enabled: true,
-                 lastUsed: 0,
-                 addedAt: Date.now(),
-                 successCount: 0,
-                 totalCalls: 0,
-                 errorCount: 0,
-                 provider: provider,
-                 status: 'active'
-               });
-               addedCount++;
-             }
-             
-             await updateKeyPool(provider, newPool);
-             // Security: Mask keys
-             const safePool = newPool.map(k => ({
-               ...k,
-               key: k.key && k.key.length > 8 ? `${k.key.slice(0, 4)}...${k.key.slice(-4)}` : "********"
-             }));
-             return new Response(JSON.stringify({ ok: true, pool: safePool, added: addedCount }), {
-                 headers: { "Content-Type": "application/json" }
-             });
+            if (!keys || typeof keys !== "string") throw new Error("Missing keys string");
 
+            let keyList: string[] = [];
+            const inputFormat = format || "auto";
+
+            if (inputFormat === "csv") {
+              keyList = keys.split(",").map((k) => k.trim()).filter(Boolean);
+            } else if (inputFormat === "text") {
+              keyList = keys.split("\n").map((k) => k.trim()).filter(Boolean);
+            } else { // auto
+              if (keys.includes("\n")) {
+                keyList = keys.split("\n").map((k) => k.trim()).filter(Boolean);
+              } else {
+                keyList = keys.split(",").map((k) => k.trim()).filter(Boolean);
+              }
+            }
+
+            // Deduplicate input
+            keyList = [...new Set(keyList)];
+
+            let addedCount = 0;
+            for (const k of keyList) {
+              // Skip if already exists in pool
+              if (pool.some((pk) => pk.key === k)) continue;
+
+              newPool.push({
+                id: crypto.randomUUID(),
+                key: k,
+                name: `Imported Key ${k.slice(0, 8)}...`,
+                enabled: true,
+                lastUsed: 0,
+                addedAt: Date.now(),
+                successCount: 0,
+                totalCalls: 0,
+                errorCount: 0,
+                provider: provider,
+                status: "active",
+              });
+              addedCount++;
+            }
+
+            await updateKeyPool(provider, newPool);
+            // Security: Mask keys
+            const safePool = newPool.map((k) => ({
+              ...k,
+              key: k.key && k.key.length > 8
+                ? `${k.key.slice(0, 4)}...${k.key.slice(-4)}`
+                : "********",
+            }));
+            return new Response(JSON.stringify({ ok: true, pool: safePool, added: addedCount }), {
+              headers: { "Content-Type": "application/json" },
+            });
           } else if (action === "update") {
-             if (!id) throw new Error("Missing id");
-             newPool = pool.map(k => k.id === id ? { ...k, ...keyItem } : k);
+            if (!id) throw new Error("Missing id");
+            newPool = pool.map((k) => k.id === id ? { ...k, ...keyItem } : k);
           } else if (action === "delete") {
-             if (!id) throw new Error("Missing id");
-             newPool = pool.filter(k => k.id !== id);
+            if (!id) throw new Error("Missing id");
+            newPool = pool.filter((k) => k.id !== id);
           } else {
-             throw new Error("Invalid action");
+            throw new Error("Invalid action");
           }
 
           await updateKeyPool(provider, newPool);
           // Security: Mask keys
-          const safePool = newPool.map(k => ({
+          const safePool = newPool.map((k) => ({
             ...k,
-            key: k.key && k.key.length > 8 ? `${k.key.slice(0, 4)}...${k.key.slice(-4)}` : "********"
+            key: k.key && k.key.length > 8
+              ? `${k.key.slice(0, 4)}...${k.key.slice(-4)}`
+              : "********",
           }));
           return new Response(JSON.stringify({ ok: true, pool: safePool }), {
-              headers: { "Content-Type": "application/json" }
+            headers: { "Content-Type": "application/json" },
           });
         } catch (e) {
-           return new Response(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }), {
-               status: 400,
-               headers: { "Content-Type": "application/json" }
-           });
+          return new Response(
+            JSON.stringify({ error: e instanceof Error ? e.message : String(e) }),
+            {
+              status: 400,
+              headers: { "Content-Type": "application/json" },
+            },
+          );
         }
       }
       return handleMethodNotAllowed(method);
-    
+
     // 管理 API：仪表盘统计
     case "/api/dashboard/stats":
       if (method === "GET") {
         const providers = providerRegistry.getNames();
-        
+
         interface ProviderStats {
           total: number;
           valid: number;
@@ -507,19 +531,19 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
         for (const name of providers) {
           const pool = getKeyPool(name);
           const total = pool.length;
-          const valid = pool.filter(k => k.enabled && !k.errorCount).length;
-          const invalid = pool.filter(k => k.enabled && !!k.errorCount).length;
+          const valid = pool.filter((k) => k.enabled && !k.errorCount).length;
+          const invalid = pool.filter((k) => k.enabled && !!k.errorCount).length;
           // Unused: never used (lastUsed is 0 or undefined)
-          const unused = pool.filter(k => !k.lastUsed).length;
-          
+          const unused = pool.filter((k) => !k.lastUsed).length;
+
           let totalCalls = 0;
           let totalSuccess = 0;
-          
-          pool.forEach(k => {
-            totalCalls += (k.totalCalls || 0);
-            totalSuccess += (k.successCount || 0);
+
+          pool.forEach((k) => {
+            totalCalls += k.totalCalls || 0;
+            totalSuccess += k.successCount || 0;
           });
-          
+
           const successRate = totalCalls > 0 ? (totalSuccess / totalCalls) : 0;
 
           stats[name] = {
@@ -529,16 +553,16 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
             unused,
             totalCalls,
             totalSuccess,
-            successRate: Number(successRate.toFixed(4))
+            successRate: Number(successRate.toFixed(4)),
           };
         }
 
         return new Response(JSON.stringify({ stats }), {
-          headers: { "Content-Type": "application/json" }
+          headers: { "Content-Type": "application/json" },
         });
       }
       return handleMethodNotAllowed(method);
-    
+
     // 管理 API：运行时配置
     case "/api/runtime-config":
       if (method === "GET") {
@@ -562,7 +586,7 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
         const nextConfig: RuntimeConfig = {
           providers: { ...current.providers },
           system: { ...current.system },
-          keyPools: current.keyPools || {}
+          keyPools: current.keyPools || {},
         };
 
         // 处理系统配置更新
@@ -576,7 +600,8 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
             if ("globalAccessKey" in systemVal) {
               const globalAccessKey = systemVal.globalAccessKey;
               if (globalAccessKey !== undefined) {
-                nextConfig.system!.globalAccessKey = globalAccessKey as SystemConfig["globalAccessKey"];
+                nextConfig.system!.globalAccessKey =
+                  globalAccessKey as SystemConfig["globalAccessKey"];
               }
             }
 
@@ -622,6 +647,7 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
         }
 
         if (changed) {
+          info("Config", `Runtime config updated: ${JSON.stringify(nextConfig.providers)}`);
           await replaceRuntimeConfig(nextConfig);
           return new Response(JSON.stringify({ ok: true, runtimeConfig: getRuntimeConfig() }), {
             headers: { "Content-Type": "application/json" },
@@ -662,16 +688,19 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
           } else {
             providerRegistry.disable(provider as ProviderName);
           }
-          
+
           // 如果没有其他任务配置，直接返回
           if (!task && !defaults) {
-             return new Response(JSON.stringify({ ok: true, runtimeConfig: getRuntimeConfig() }), {
+            return new Response(JSON.stringify({ ok: true, runtimeConfig: getRuntimeConfig() }), {
               headers: { "Content-Type": "application/json" },
             });
           }
         }
 
-        if ((task !== "text" && task !== "edit" && task !== "blend") || !defaults || typeof defaults !== "object") {
+        if (
+          (task !== "text" && task !== "edit" && task !== "blend") || !defaults ||
+          typeof defaults !== "object"
+        ) {
           return new Response(JSON.stringify({ error: "Invalid payload" }), {
             status: 400,
             headers: { "Content-Type": "application/json" },
@@ -681,7 +710,10 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
         await setProviderTaskDefaults(provider as ProviderName, task, {
           model: ("model" in defaults ? defaults.model : undefined) as string | null | undefined,
           size: ("size" in defaults ? defaults.size : undefined) as string | null | undefined,
-          quality: ("quality" in defaults ? defaults.quality : undefined) as string | null | undefined,
+          quality: ("quality" in defaults ? defaults.quality : undefined) as
+            | string
+            | null
+            | undefined,
           n: ("n" in defaults ? defaults.n : undefined) as number | null | undefined,
         });
 
@@ -698,7 +730,9 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
 /**
  * 附加 CORS 响应头中间件
  */
-function attachCorsHeaders(handler: (req: Request) => Promise<Response>): (req: Request) => Promise<Response> {
+function attachCorsHeaders(
+  handler: (req: Request) => Promise<Response>,
+): (req: Request) => Promise<Response> {
   return async (req: Request): Promise<Response> => {
     const response = await handler(req);
 
@@ -714,7 +748,7 @@ function attachCorsHeaders(handler: (req: Request) => Promise<Response>): (req: 
         for (const [key, value] of Object.entries(corsHeaders)) {
           newHeaders.set(key, value);
         }
-        
+
         return new Response(response.body, {
           status: response.status,
           statusText: response.statusText,

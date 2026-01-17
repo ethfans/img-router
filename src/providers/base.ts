@@ -1,6 +1,6 @@
 /**
  * @fileoverview Provider 基础接口定义
- * 
+ *
  * 定义了所有图片生成服务提供商 (Provider) 必须遵循的接口规范和基类实现。
  * 包含能力描述、配置结构以及核心生成方法的抽象定义。
  */
@@ -8,17 +8,18 @@
 import type { GenerationResult, ImageGenerationRequest } from "../types/index.ts";
 import type { ImagesBlendRequest } from "../types/request.ts";
 import { getProviderTaskDefaults } from "../config/manager.ts";
+import { info } from "../core/logger.ts";
 
 /**
  * 支持的 Provider 名称枚举
  */
 export type ProviderName =
-  | "Doubao"      // 豆包
-  | "Gitee"       // Gitee AI
-  | "ModelScope"  // ModelScope
+  | "Doubao" // 豆包
+  | "Gitee" // Gitee AI
+  | "ModelScope" // ModelScope
   | "HuggingFace" // Hugging Face
-  | "Pollinations"// Pollinations AI
-  | "Unknown";    // 未知
+  | "Pollinations" // Pollinations AI
+  | "Unknown"; // 未知
 
 /**
  * Provider 能力描述接口
@@ -35,8 +36,10 @@ export interface ProviderCapabilities {
   asyncTask: boolean;
   /** 最大支持的输入图片数量 */
   maxInputImages: number;
-  /** 最大支持的输出图片数量 (文生图 n 参数) */
+  /** 系统对外宣称支持的最大输出数量 (通过并发模拟) */
   maxOutputImages: number;
+  /** 原生 API 单次请求支持的最大输出数量 (若未定义则默认为 1) */
+  maxNativeOutputImages?: number;
   /** 最大支持的图片编辑输出数量 (图生图 n 参数) */
   maxEditOutputImages: number;
   /** 最大支持的融合生图输出数量 (融合 n 参数) */
@@ -146,7 +149,7 @@ export interface IProvider {
 
   /**
    * 融合生图 (Multi-Image Fusion)
-   * 
+   *
    * @param apiKey - API 密钥
    * @param request - 融合请求参数
    * @param options - 生成选项
@@ -161,7 +164,7 @@ export interface IProvider {
 
 /**
  * Provider 抽象基类
- * 
+ *
  * 实现了部分通用逻辑（如模型选择、参数验证），减少子类重复代码。
  * 子类只需关注核心的 `generate` 和 `detectApiKey` 实现。
  */
@@ -315,13 +318,8 @@ export abstract class BaseProvider implements IProvider {
 
   /**
    * 智能选择生成数量
-   * 优先级：请求指定 -> 运行时覆盖配置 -> 默认配置 -> 1
-   * 
-   * 特殊逻辑：
-   * 如果 requestCount 为 1（通常是 WebUI 的默认/错误行为），但 config.defaultCount 显式设置为大于 1，
-   * 并且启用了 forceDefaultCount 策略（这里通过判断 defaultCount > 1 隐式启用），
-   * 则优先使用 defaultCount。
-   * 这解决了某些 WebUI 无法正确发送 n>1 参数的问题。
+   * 非魔搭渠道优先级：请求指定 -> 运行时覆盖配置 -> 默认配置 -> 1
+   * 魔搭渠道优先级：运行时覆盖配置 -> 默认配置 -> 1（忽略请求中的 n）
    *
    * @param {number} [requestCount] - 请求中指定的数量
    * @param {boolean} hasImages - 是否包含输入图片
@@ -330,24 +328,33 @@ export abstract class BaseProvider implements IProvider {
   protected selectCount(requestCount: number | undefined, hasImages: boolean): number {
     const override = getProviderTaskDefaults(this.name, hasImages ? "edit" : "text");
     const defaultConfig = hasImages ? this.config.defaultEditCount : this.config.defaultCount;
-    
-    // 1. 优先检查运行时动态配置 (Highest Priority)
-    if (override.n !== undefined && override.n !== null) {
-      return override.n;
+
+    info(
+      this.name,
+      `selectCount check: requestN=${requestCount}, overrideN=${override.n}, defaultN=${defaultConfig}, task=${
+        hasImages ? "edit" : "text"
+      }`
+    );
+
+    // ModelScope 特例：强制优先使用 WebUI 运行时配置
+    // 如果 WebUI 中配置了 n，则无视请求参数，直接使用配置值
+    if (this.name === "ModelScope") {
+      if (override.n !== undefined && override.n !== null) {
+        info(this.name, `Using ModelScope override n=${override.n}`);
+        return override.n;
+      }
     }
 
-    // 2. 检查静态默认配置是否强于请求 (Special Logic for WebUI compatibility)
-    // 如果请求是 n=1 (可能是默认值)，但我们在配置里显式设置了 > 1 的默认值，则使用配置值
-    if (requestCount === 1 && defaultConfig !== undefined && defaultConfig > 1) {
-        return defaultConfig;
-    }
-
-    // 3. 使用请求中的数量
     if (requestCount !== undefined) {
       return requestCount;
     }
 
-    // 4. 使用静态默认配置
+    // 运行时动态默认配置
+    if (override.n !== undefined && override.n !== null) {
+      return override.n;
+    }
+
+    // 静态默认配置
     if (defaultConfig !== undefined) {
       return defaultConfig;
     }
@@ -371,5 +378,84 @@ export abstract class BaseProvider implements IProvider {
       };
     }
     return { width: 1024, height: 1024 }; // 默认回退值
+  }
+
+  /**
+   * 通用并发生成策略
+   *
+   * 当请求的 n 超过 Provider 原生支持的最大数量时，自动拆分为多个请求并发执行。
+   *
+   * @param apiKey - API Key
+   * @param request - 原始请求
+   * @param options - 生成选项
+   * @param executor - 执行单次（或原生最大数量）生成的具体函数
+   * @returns 合并后的生成结果
+   */
+  protected async generateWithConcurrency(
+    _apiKey: string,
+    request: ImageGenerationRequest,
+    _options: GenerationOptions,
+    executor: (req: ImageGenerationRequest) => Promise<GenerationResult>
+  ): Promise<GenerationResult> {
+    const requestedN = request.n || 1;
+    const maxNative = this.capabilities.maxNativeOutputImages || 1;
+
+    // 如果请求数量在原生支持范围内，直接执行
+    if (requestedN <= maxNative) {
+      return executor(request);
+    }
+
+    info(
+      this.name,
+      `检测到 n=${requestedN} 超过原生限制 (${maxNative})，启用通用并发生成模式`
+    );
+
+    const tasks: Promise<GenerationResult>[] = [];
+    let remainingN = requestedN;
+
+    // 拆分任务
+    let batchIndex = 0;
+    while (remainingN > 0) {
+      const currentBatchN = Math.min(remainingN, maxNative);
+      remainingN -= currentBatchN;
+
+      const subRequest = { ...request, n: currentBatchN };
+      const taskDelay = batchIndex * 200; // 简单的限流策略：每个任务间隔 200ms
+
+      const taskPromise = (async () => {
+        if (taskDelay > 0) await new Promise((r) => setTimeout(r, taskDelay));
+        return executor(subRequest);
+      })();
+
+      tasks.push(taskPromise);
+      batchIndex++;
+    }
+
+    const startTime = Date.now();
+
+    try {
+      // 并发执行所有任务
+      const results = await Promise.all(tasks);
+
+      // 合并结果
+      const allImages = results.flatMap((r) => r.images || []);
+      const firstResult = results[0]; // 使用第一个结果作为元数据模板
+
+      // 计算总耗时
+      const duration = Date.now() - startTime;
+
+      return {
+        success: true,
+        images: allImages,
+        model: firstResult.model,
+        provider: this.name,
+        duration,
+        // 如果需要，可以合并其他元数据
+      };
+    } catch (error) {
+      // 简单起见，如果任何一个任务失败，抛出错误。
+      // 生产环境可能需要更复杂的 Partial Success 处理，但目前先保持一致性。
+      throw error;
+    }
   }
 }

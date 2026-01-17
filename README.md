@@ -321,13 +321,13 @@ export const API_TIMEOUT_MS = 300000;
 
 ## API Key 格式
 
-| 渠道         | 格式                | 示例                                         | 获取地址                                                                                       |
-| ------------ | ------------------- | -------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| 渠道         | 格式                | 示例                                         | 获取地址                                                                                            |
+| ------------ | ------------------- | -------------------------------------------- | --------------------------------------------------------------------------------------------------- |
 | 火山引擎     | UUID                | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`       | [获取密钥](https://console.Doubao Seedream.com/ark/region:ark+cn-beijing/openManagement/rewardPlan) |
-| Gitee        | 30-60位字母数字     | `abc123def456...`                            | [获取密钥](https://ai.gitee.com/ondobtug/dashboard/settings/tokens)                            |
-| ModelScope   | `ms-` 开头          | `ms-xxxxxxxxxx`                              | [获取密钥](https://www.modelscope.cn/my/myaccesstoken)                                         |
-| Hugging Face | `hf_` 开头          | `hf_xxxxxxxxxx`                              | [获取密钥](https://huggingface.co/settings/tokens)                                             |
-| Pollinations | `pk_` 或 `sk_` 开头 | `pk_3Ff4YHCp8TkauKXq` 或 `sk_zzqmqZp3Jex...` | [获取密钥](https://enter.pollinations.ai/)                                                     |
+| Gitee        | 30-60位字母数字     | `abc123def456...`                            | [获取密钥](https://ai.gitee.com/ondobtug/dashboard/settings/tokens)                                 |
+| ModelScope   | `ms-` 开头          | `ms-xxxxxxxxxx`                              | [获取密钥](https://www.modelscope.cn/my/myaccesstoken)                                              |
+| Hugging Face | `hf_` 开头          | `hf_xxxxxxxxxx`                              | [获取密钥](https://huggingface.co/settings/tokens)                                                  |
+| Pollinations | `pk_` 或 `sk_` 开头 | `pk_3Ff4YHCp8TkauKXq` 或 `sk_zzqmqZp3Jex...` | [获取密钥](https://enter.pollinations.ai/)                                                          |
 
 系统根据 API Key 格式自动识别渠道，无需手动指定。
 

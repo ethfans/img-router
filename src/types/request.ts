@@ -1,12 +1,12 @@
 /**
  * @fileoverview 请求/响应类型定义
- * 
+ *
  * 定义了符合 OpenAI API 标准的请求和响应数据结构。
  * 同时也包含了一些为了兼容其他格式（如 Cherry Studio）而定义的扩展类型。
  */
 
-/** 
- * 文本内容项 
+/**
+ * 文本内容项
  * 用于多模态消息中的文本部分
  */
 export interface TextContentItem {
@@ -14,8 +14,8 @@ export interface TextContentItem {
   text: string;
 }
 
-/** 
- * 图片 URL 内容项 
+/**
+ * 图片 URL 内容项
  * 标准 OpenAI 格式，用于传递图片链接
  */
 export interface ImageUrlContentItem {
@@ -23,8 +23,8 @@ export interface ImageUrlContentItem {
   image_url?: { url: string };
 }
 
-/** 
- * 非标准图片内容项 
+/**
+ * 非标准图片内容项
  * 兼容部分客户端（如 Cherry Studio）直接传递 Base64 的格式
  */
 export interface NonStandardImageContentItem {
@@ -35,8 +35,8 @@ export interface NonStandardImageContentItem {
   mediaType?: string;
 }
 
-/** 
- * 消息内容项联合类型 
+/**
+ * 消息内容项联合类型
  * 消息内容可以是纯文本，也可以是多模态数组
  */
 export type MessageContentItem =
@@ -44,8 +44,8 @@ export type MessageContentItem =
   | ImageUrlContentItem
   | NonStandardImageContentItem;
 
-/** 
- * 聊天消息接口 
+/**
+ * 聊天消息接口
  */
 export interface Message {
   /** 角色 (system, user, assistant) */
@@ -54,8 +54,8 @@ export interface Message {
   content: string | MessageContentItem[];
 }
 
-/** 
- * Chat Completions (聊天补全) 请求格式 
+/**
+ * Chat Completions (聊天补全) 请求格式
  * 对应 POST /v1/chat/completions
  */
 export interface ChatRequest {
@@ -71,8 +71,8 @@ export interface ChatRequest {
   [key: string]: unknown;
 }
 
-/** 
- * OpenAI Images (文生图) 请求格式 
+/**
+ * OpenAI Images (文生图) 请求格式
  * 对应 POST /v1/images/generations
  */
 export interface ImagesRequest {
@@ -92,8 +92,8 @@ export interface ImagesRequest {
   [key: string]: unknown;
 }
 
-/** 
- * OpenAI Images Edit (图生图/修图) 请求格式 
+/**
+ * OpenAI Images Edit (图生图/修图) 请求格式
  * 对应 POST /v1/images/edits
  */
 export interface ImagesEditRequest {
@@ -117,8 +117,8 @@ export interface ImagesEditRequest {
   [key: string]: unknown;
 }
 
-/** 
- * 图片数据接口 
+/**
+ * 图片数据接口
  * 响应中单张图片的数据结构
  */
 export interface ImageData {
@@ -128,8 +128,8 @@ export interface ImageData {
   b64_json?: string;
 }
 
-/** 
- * Chat Completions (聊天补全) 响应格式 
+/**
+ * Chat Completions (聊天补全) 响应格式
  */
 export interface ChatCompletionResponse {
   id: string;
@@ -151,8 +151,8 @@ export interface ChatCompletionResponse {
   };
 }
 
-/** 
- * Chat Completions 流式响应块格式 (SSE) 
+/**
+ * Chat Completions 流式响应块格式 (SSE)
  */
 export interface ChatCompletionChunk {
   id: string;
@@ -169,16 +169,16 @@ export interface ChatCompletionChunk {
   }[];
 }
 
-/** 
- * Images API 标准响应格式 
+/**
+ * Images API 标准响应格式
  */
 export interface ImagesResponse {
   created: number;
   data: ImageData[];
 }
 
-/** 
- * 内部图片生成请求对象 
+/**
+ * 内部图片生成请求对象
  * 经过标准化的请求数据，供 Provider 内部使用
  */
 export interface ImageGenerationRequest {
@@ -202,7 +202,7 @@ export interface ImageGenerationRequest {
   [key: string]: unknown;
 }
 
-/** 
+/**
  * 融合生图请求格式 (自定义)
  * 对应 POST /v1/images/blend
  * 支持携带对话上下文和图片

@@ -1,6 +1,6 @@
 /**
  * @fileoverview Provider 注册表模块
- * 
+ *
  * 核心功能：
  * 1. 管理所有图片生成 Provider 的生命周期（注册/注销）
  * 2. 提供 Provider 的查找、过滤和获取功能
@@ -31,7 +31,7 @@ interface ProviderRegistration {
 
 /**
  * Provider 注册表管理类
- * 
+ *
  * 这是一个单例模式的实现（通过导出实例），负责维护系统中所有可用的 Provider。
  */
 class ProviderRegistry {
@@ -72,14 +72,15 @@ class ProviderRegistry {
     const successStr = successList.length > 0 ? successList.join(", ") : "无";
     const failStr = failList.length > 0 ? failList.join(", ") : "无";
 
-    const report = `\n ✅ 已注册Provider(${successList.length}): ${successStr}\n ❌ 未注册Provider(${failList.length}): ${failStr}`;
+    const report =
+      `\n ✅ 已注册Provider(${successList.length}): ${successStr}\n ❌ 未注册Provider(${failList.length}): ${failStr}`;
 
     debug(MODULE, report);
   }
 
   /**
    * 注册一个新的 Provider
-   * 
+   *
    * @param {IProvider} provider - Provider 实例
    * @param {boolean} [enabled=true] - 初始启用状态
    */
@@ -92,7 +93,7 @@ class ProviderRegistry {
 
   /**
    * 注销一个 Provider
-   * 
+   *
    * @param {ProviderName} name - 要注销的 Provider 名称
    * @returns {boolean} 如果注销成功返回 true，不存在返回 false
    */
@@ -106,7 +107,7 @@ class ProviderRegistry {
 
   /**
    * 获取 Provider 实例
-   * 
+   *
    * @param {ProviderName} name - Provider 名称
    * @param {boolean} [ignoreEnabled=false] - 是否忽略启用状态（强制获取，即使已禁用）
    * @returns {IProvider | undefined} Provider 实例，如果不存在或已禁用（且未忽略）则返回 undefined
@@ -129,7 +130,7 @@ class ProviderRegistry {
   /**
    * 获取 Provider 实例（严格模式）
    * 如果不存在或已禁用，将抛出错误
-   * 
+   *
    * @param {ProviderName} name - Provider 名称
    * @returns {IProvider} Provider 实例
    * @throws {Error} 如果 Provider 不存在
@@ -144,7 +145,7 @@ class ProviderRegistry {
 
   /**
    * 检查 Provider 是否存在且已启用
-   * 
+   *
    * @param {ProviderName} name - Provider 名称
    * @returns {boolean} 存在且启用返回 true
    */
@@ -155,7 +156,7 @@ class ProviderRegistry {
 
   /**
    * 获取所有已注册的 Provider 名称列表
-   * 
+   *
    * @returns {ProviderName[]} 名称数组
    */
   getNames(): ProviderName[] {
@@ -164,7 +165,7 @@ class ProviderRegistry {
 
   /**
    * 获取所有已启用的 Provider 名称列表
-   * 
+   *
    * @returns {ProviderName[]} 名称数组
    */
   getEnabledNames(): ProviderName[] {
@@ -175,7 +176,7 @@ class ProviderRegistry {
 
   /**
    * 获取所有已启用 Provider 的配置信息
-   * 
+   *
    * @returns {ProviderConfig[]} 配置数组
    */
   getAllConfigs(): ProviderConfig[] {
@@ -186,7 +187,7 @@ class ProviderRegistry {
 
   /**
    * 获取指定 Provider 的能力描述
-   * 
+   *
    * @param {ProviderName} name - Provider 名称
    * @returns {ProviderCapabilities | undefined} 能力描述对象
    */
@@ -197,7 +198,7 @@ class ProviderRegistry {
   /**
    * 根据模型名称查找支持该模型的 Provider
    * 优先匹配已启用的 Provider
-   * 
+   *
    * @param {string} model - 模型名称
    * @returns {IProvider | undefined} 匹配的 Provider 实例
    */
@@ -205,21 +206,21 @@ class ProviderRegistry {
     // 遍历所有已启用的 Provider
     for (const reg of this.registrations.values()) {
       if (!reg.enabled) continue;
-      
+
       const supported = reg.instance.getSupportedModels();
       if (supported.includes(model)) {
         return reg.instance;
       }
     }
-    
+
     // 如果没有精确匹配，后续可以扩展支持前缀匹配或模糊匹配
-    
+
     return undefined;
   }
 
   /**
    * 根据能力需求过滤 Provider
-   * 
+   *
    * @param {Partial<ProviderCapabilities>} filter - 能力过滤条件
    * @returns {ProviderName[]} 符合条件的 Provider 名称列表
    */
@@ -228,7 +229,7 @@ class ProviderRegistry {
       .filter(([_, reg]) => {
         if (!reg.enabled) return false;
         const caps = reg.instance.capabilities;
-        
+
         // 逐项检查能力要求
         if (filter.textToImage !== undefined && caps.textToImage !== filter.textToImage) {
           return false;
@@ -240,7 +241,7 @@ class ProviderRegistry {
           filter.multiImageFusion !== undefined && caps.multiImageFusion !== filter.multiImageFusion
         ) return false;
         if (filter.asyncTask !== undefined && caps.asyncTask !== filter.asyncTask) return false;
-        
+
         return true;
       })
       .map(([name, _]) => name);
@@ -248,7 +249,7 @@ class ProviderRegistry {
 
   /**
    * 启用指定的 Provider
-   * 
+   *
    * @param {ProviderName} name - Provider 名称
    * @returns {boolean} 操作是否成功
    */
@@ -264,7 +265,7 @@ class ProviderRegistry {
 
   /**
    * 禁用指定的 Provider
-   * 
+   *
    * @param {ProviderName} name - Provider 名称
    * @returns {boolean} 操作是否成功
    */
@@ -299,7 +300,7 @@ class ProviderRegistry {
 
   /**
    * 根据 API Key 格式自动检测并路由到对应的 Provider
-   * 
+   *
    * @param {string} apiKey - API 密钥
    * @returns {IProvider | undefined} 匹配的 Provider 实例
    */

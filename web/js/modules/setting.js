@@ -1,19 +1,19 @@
 /**
  * 系统设置模块
- * 
+ *
  * 负责管理系统基础配置，包括端口、超时、CORS、日志、健康检查、运行模式和图片压缩设置。
  * 支持自动保存功能。
  */
 
-import { apiFetch, debounce } from './utils.js';
+import { apiFetch, debounce } from "./utils.js";
 
 /**
  * 渲染设置页面
- * 
+ *
  * @param {HTMLElement} container - 容器元素
  */
 export async function renderSetting(container) {
-    container.innerHTML = `
+  container.innerHTML = `
         <div class="card">
             <div class="card-header">
                 <h3 class="card-title">基础设置</h3>
@@ -185,108 +185,110 @@ export async function renderSetting(container) {
         </style>
     `;
 
-    // 事件监听：自动保存
-    const inputs = container.querySelectorAll('input');
-    inputs.forEach(input => {
-        input.addEventListener('change', debounceSave);
-        input.addEventListener('input', debounceSave);
-    });
+  // 事件监听：自动保存
+  const inputs = container.querySelectorAll("input");
+  inputs.forEach((input) => {
+    input.addEventListener("change", debounceSave);
+    input.addEventListener("input", debounceSave);
+  });
 
-    // 加载当前设置
-    await loadSystemSettings();
+  // 加载当前设置
+  await loadSystemSettings();
 }
 
 /**
  * 从后端加载系统配置
  */
 async function loadSystemSettings() {
-    try {
-        const res = await apiFetch('/api/config');
-        if (!res.ok) return;
-        const config = await res.json();
+  try {
+    const res = await apiFetch("/api/config");
+    if (!res.ok) return;
+    const config = await res.json();
 
-        // 基础设置
-        document.getElementById('port').value = config.port;
-        document.getElementById('timeout').value = config.timeout / 1000;
-        document.getElementById('maxBody').value = config.maxBody / 1024 / 1024;
-        
-        document.getElementById('cors').checked = config.cors;
-        document.getElementById('logging').checked = config.logging;
-        document.getElementById('health').checked = config.healthCheck;
+    // 基础设置
+    document.getElementById("port").value = config.port;
+    document.getElementById("timeout").value = config.timeout / 1000;
+    document.getElementById("maxBody").value = config.maxBody / 1024 / 1024;
 
-        // 运行模式
-        const runtimeSystem = (config.runtimeConfig && config.runtimeConfig.system) ? config.runtimeConfig.system : {};
-        const modes = runtimeSystem.modes || { relay: true, backend: false };
-        
-        document.getElementById('modeRelay').checked = modes.relay;
-        document.getElementById('modeBackend').checked = modes.backend;
-        document.getElementById('globalAccessKey').value = runtimeSystem.globalAccessKey || '';
+    document.getElementById("cors").checked = config.cors;
+    document.getElementById("logging").checked = config.logging;
+    document.getElementById("health").checked = config.healthCheck;
 
-        // 图片压缩设置 (从 runtimeConfig 读取)
-        document.getElementById('compressThreshold').value = runtimeSystem.compressThreshold || 5;
-        document.getElementById('compressTarget').value = runtimeSystem.compressTarget || 2;
-    } catch (e) {
-        console.error('Failed to load settings:', e);
-    }
+    // 运行模式
+    const runtimeSystem = (config.runtimeConfig && config.runtimeConfig.system)
+      ? config.runtimeConfig.system
+      : {};
+    const modes = runtimeSystem.modes || { relay: true, backend: false };
+
+    document.getElementById("modeRelay").checked = modes.relay;
+    document.getElementById("modeBackend").checked = modes.backend;
+    document.getElementById("globalAccessKey").value = runtimeSystem.globalAccessKey || "";
+
+    // 图片压缩设置 (从 runtimeConfig 读取)
+    document.getElementById("compressThreshold").value = runtimeSystem.compressThreshold || 5;
+    document.getElementById("compressTarget").value = runtimeSystem.compressTarget || 2;
+  } catch (e) {
+    console.error("Failed to load settings:", e);
+  }
 }
 
 /**
  * 防抖保存函数
  */
 const debounceSave = debounce(async () => {
-    await saveSystemSettings();
+  await saveSystemSettings();
 }, 1000);
 
 /**
  * 保存系统配置到后端
  */
 async function saveSystemSettings() {
-    const statusDot = document.querySelector('.status-dot');
-    const statusText = document.querySelector('.status-pill span');
+  const statusDot = document.querySelector(".status-dot");
+  const statusText = document.querySelector(".status-pill span");
+  if (statusDot) {
+    statusDot.style.background = "#ffd700";
+    if (statusText) statusText.innerText = "保存中...";
+  }
+
+  try {
+    const systemConfig = {
+      // 基础设置
+      port: Number(document.getElementById("port").value),
+      apiTimeout: Number(document.getElementById("timeout").value) * 1000, // 转换为毫秒
+      maxBodySize: Number(document.getElementById("maxBody").value) * 1024 * 1024, // 转换为字节
+
+      // 功能开关
+      cors: document.getElementById("cors").checked,
+      requestLogging: document.getElementById("logging").checked,
+      healthCheck: document.getElementById("health").checked,
+
+      modes: {
+        relay: document.getElementById("modeRelay").checked,
+        backend: document.getElementById("modeBackend").checked,
+      },
+      globalAccessKey: document.getElementById("globalAccessKey").value,
+      // 图片压缩配置 (扁平化存储以匹配后端 SystemConfig)
+      compressThreshold: Number(document.getElementById("compressThreshold").value),
+      compressTarget: Number(document.getElementById("compressTarget").value),
+    };
+
+    // 发送运行时配置更新
+    await apiFetch("/api/runtime-config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ system: systemConfig }),
+    });
+
     if (statusDot) {
-        statusDot.style.background = '#ffd700';
-        if (statusText) statusText.innerText = '保存中...';
+      statusDot.style.background = "var(--success)";
+      if (statusText) statusText.innerText = "已保存";
+      setTimeout(() => {
+        if (statusText) statusText.innerText = "运行中";
+      }, 2000);
     }
-
-    try {
-        const systemConfig = {
-            // 基础设置
-            port: Number(document.getElementById('port').value),
-            apiTimeout: Number(document.getElementById('timeout').value) * 1000, // 转换为毫秒
-            maxBodySize: Number(document.getElementById('maxBody').value) * 1024 * 1024, // 转换为字节
-            
-            // 功能开关
-            cors: document.getElementById('cors').checked,
-            requestLogging: document.getElementById('logging').checked,
-            healthCheck: document.getElementById('health').checked,
-
-            modes: {
-                relay: document.getElementById('modeRelay').checked,
-                backend: document.getElementById('modeBackend').checked
-            },
-            globalAccessKey: document.getElementById('globalAccessKey').value,
-            // 图片压缩配置 (扁平化存储以匹配后端 SystemConfig)
-            compressThreshold: Number(document.getElementById('compressThreshold').value),
-            compressTarget: Number(document.getElementById('compressTarget').value)
-        };
-
-        // 发送运行时配置更新
-        await apiFetch('/api/runtime-config', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ system: systemConfig })
-        });
-        
-        if (statusDot) {
-            statusDot.style.background = 'var(--success)';
-            if (statusText) statusText.innerText = '已保存';
-            setTimeout(() => {
-                if (statusText) statusText.innerText = '运行中';
-            }, 2000);
-        }
-    } catch (e) {
-        console.error(e);
-        if (statusDot) statusDot.style.background = 'var(--error)';
-        if (statusText) statusText.innerText = '保存失败';
-    }
+  } catch (e) {
+    console.error(e);
+    if (statusDot) statusDot.style.background = "var(--error)";
+    if (statusText) statusText.innerText = "保存失败";
+  }
 }

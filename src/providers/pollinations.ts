@@ -17,7 +17,11 @@ import {
   type ProviderConfig,
 } from "./base.ts";
 import type { GenerationResult, ImageData, ImageGenerationRequest } from "../types/index.ts";
-import { API_TIMEOUT_MS, IMAGE_BED_CONFIG as ImageBedConfig, PollinationsConfig } from "../config/manager.ts";
+import {
+  API_TIMEOUT_MS,
+  IMAGE_BED_CONFIG as ImageBedConfig,
+  PollinationsConfig,
+} from "../config/manager.ts";
 import { getProviderTaskDefaults } from "../config/manager.ts";
 import { fetchWithTimeout } from "../utils/http.ts";
 import { error, info, warn } from "../core/logger.ts";
@@ -34,7 +38,7 @@ import { withApiTiming } from "../middleware/timing.ts";
 
 /**
  * 根据图片魔数检测 MIME 类型
- * 
+ *
  * 通过读取二进制数据的前几个字节（Magic Number）来准确判断图片格式。
  * 支持 PNG, JPEG, GIF, WEBP, BMP。
  *
@@ -66,7 +70,7 @@ function detectImageMimeType(uint8Array: Uint8Array): string | null {
 
 /**
  * 将 Base64 图片上传到图床获取 URL
- * 
+ *
  * Pollinations 的图生图接口需要图片 URL。
  * 如果输入是 Base64，此函数将其上传到配置的图床（如 EasyImage）以获取可用的 URL。
  *
@@ -141,7 +145,7 @@ async function uploadBase64ToImageBed(base64Data: string): Promise<string> {
 
 /**
  * Pollinations Provider 实现类
- * 
+ *
  * 封装了 Pollinations.ai 的调用逻辑。
  * 主要处理 URL 参数的构建和返回的二进制图片数据的解析。
  */
@@ -153,12 +157,12 @@ export class PollinationsProvider extends BaseProvider {
    * Provider 能力描述
    */
   readonly capabilities: ProviderCapabilities = {
-    textToImage: true,      // 支持文生图
-    imageToImage: true,     // 支持图生图
+    textToImage: true, // 支持文生图
+    imageToImage: true, // 支持图生图
     multiImageFusion: true, // 支持多图融合（通过拼接 URL）
-    asyncTask: false,       // 同步返回结果
-    maxInputImages: 3,      // 限制输入图片数量
-    maxOutputImages: 1,     // 文生图上限
+    asyncTask: false, // 同步返回结果
+    maxInputImages: 3, // 限制输入图片数量
+    maxOutputImages: 1, // 文生图上限
     maxEditOutputImages: 1, // 图生图上限
     maxBlendOutputImages: 1, // 融合上限
     outputFormats: ["b64_json"], // 仅支持 Base64 输出（因为接口直接返回图片流）
@@ -253,7 +257,7 @@ export class PollinationsProvider extends BaseProvider {
 
   /**
    * 处理文生图请求
-   * 
+   *
    * 构建 GET 请求 URL，将 Prompt 和参数（模型、尺寸、Seed 等）编码到 URL 中。
    */
   private async textToImage(
@@ -307,11 +311,11 @@ export class PollinationsProvider extends BaseProvider {
     );
 
     if (!response.ok) {
-    const errorText = await response.text();
-    error("Pollinations", `API 请求失败 (${response.status}): ${errorText.substring(0, 1000)}`);
-    const friendlyError = parseErrorMessage(errorText, response.status, "Pollinations");
-    throw new Error(friendlyError);
-  }
+      const errorText = await response.text();
+      error("Pollinations", `API 请求失败 (${response.status}): ${errorText.substring(0, 1000)}`);
+      const friendlyError = parseErrorMessage(errorText, response.status, "Pollinations");
+      throw new Error(friendlyError);
+    }
 
     // GET 端点直接返回图片二进制，转换为 Base64
     const arrayBuffer = await response.arrayBuffer();
@@ -333,7 +337,7 @@ export class PollinationsProvider extends BaseProvider {
 
   /**
    * 处理图生图请求
-   * 
+   *
    * 1. 检查模型是否支持编辑。
    * 2. 将 Base64 图片上传到图床。
    * 3. 构建包含图片 URL 的 GET 请求。
@@ -432,11 +436,11 @@ export class PollinationsProvider extends BaseProvider {
     );
 
     if (!response.ok) {
-    const errorText = await response.text();
-    error("Pollinations", `API 请求失败 (${response.status}): ${errorText.substring(0, 1000)}`);
-    const friendlyError = parseErrorMessage(errorText, response.status, "Pollinations");
-    throw new Error(friendlyError);
-  }
+      const errorText = await response.text();
+      error("Pollinations", `API 请求失败 (${response.status}): ${errorText.substring(0, 1000)}`);
+      const friendlyError = parseErrorMessage(errorText, response.status, "Pollinations");
+      throw new Error(friendlyError);
+    }
 
     const arrayBuffer = await response.arrayBuffer();
     const uint8Array = new Uint8Array(arrayBuffer);

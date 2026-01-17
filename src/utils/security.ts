@@ -1,6 +1,6 @@
 /**
  * @fileoverview 安全工具模块
- * 
+ *
  * 提供系统安全相关的工具函数，主要包括：
  * 1. SSRF (服务端请求伪造) 防护：检查 IP 和 URL 安全性
  * 2. 输入清洗：防止注入攻击
@@ -38,7 +38,7 @@ const DANGEROUS_HOSTNAMES = [
 
 /**
  * 检查 IP 地址是否为私有地址或保留地址
- * 
+ *
  * @param {string} ip - 待检查的 IP 地址字符串
  * @returns {boolean} 如果是私有 IP 则返回 true
  */
@@ -49,7 +49,7 @@ export function isPrivateIp(ip: string): boolean {
 /**
  * 检查主机名是否安全
  * 验证主机名是否在危险列表中，或是否解析为私有 IP
- * 
+ *
  * @param {string} hostname - 待检查的主机名
  * @returns {boolean} 如果主机名安全则返回 true
  */
@@ -72,7 +72,7 @@ export function isSafeHostname(hostname: string): boolean {
 /**
  * 检查 URL 是否安全
  * 用于防止 SSRF 攻击，确保请求不会发往内网或敏感服务
- * 
+ *
  * @param {string} urlString - 待检查的完整 URL
  * @returns {boolean} 如果 URL 安全则返回 true
  */
@@ -100,7 +100,7 @@ export function isSafeUrl(urlString: string): boolean {
 /**
  * 清理用户输入的字符串
  * 移除潜在的危险字符，防止注入攻击
- * 
+ *
  * @param {string} input - 用户原始输入
  * @param {number} [maxLength=10000] - 允许的最大长度
  * @returns {string} 清理后的安全字符串
@@ -134,7 +134,7 @@ export function sanitizeInput(input: string, maxLength: number = 10000): string 
 /**
  * 验证 API 密钥格式是否有效
  * 仅检查格式（长度和字符集），不验证密钥的真实性
- * 
+ *
  * @param {string} apiKey - 待验证的 API 密钥
  * @param {number} [minLength=10] - 最小允许长度
  * @returns {boolean} 格式有效返回 true
@@ -161,7 +161,7 @@ export function isValidApiKeyFormat(apiKey: string, minLength: number = 10): boo
 /**
  * 对敏感信息（如 API Key）进行脱敏处理
  * 用于在日志或界面中安全地显示部分信息
- * 
+ *
  * @param {string} value - 原始敏感值
  * @param {number} [visibleChars=4] - 开头和结尾保留的可见字符数
  * @returns {string} 脱敏后的字符串 (如 "sk-a****bcde")

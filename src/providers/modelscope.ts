@@ -16,16 +16,20 @@ import {
   type ProviderConfig,
   type ProviderName,
 } from "./base.ts";
-import type { GenerationResult, ImageGenerationRequest } from "../types/index.ts";
+import type {
+  GenerationResult,
+  ImageGenerationRequest,
+  ImagesBlendRequest,
+  Message,
+  MessageContentItem,
+  NonStandardImageContentItem,
+} from "../types/index.ts";
 import { ModelScopeConfig } from "../config/manager.ts";
-import { base64ToUrl, fetchWithTimeout } from "../utils/index.ts";
-import { buildDataUri, urlToBase64 } from "../utils/image.ts";
+import { base64ToUrl, fetchWithTimeout, urlToBase64 } from "../utils/index.ts";
+import { buildDataUri } from "../utils/image.ts";
 import {
-  debug,
-  error,
   info,
   logFullPrompt,
-  logGeneratedImages,
   logImageGenerationComplete,
   logImageGenerationFailed,
   logImageGenerationStart,
@@ -37,7 +41,7 @@ import { withApiTiming } from "../middleware/timing.ts";
 
 /**
  * ModelScope Provider 实现类
- * 
+ *
  * 封装了与 ModelScope 异步 API 的交互。
  * 重点处理异步轮询和异常状态的兼容。
  */
@@ -49,14 +53,15 @@ export class ModelScopeProvider extends BaseProvider {
    * Provider 能力描述
    */
   readonly capabilities: ProviderCapabilities = {
-    textToImage: true,      // 支持文生图
-    imageToImage: true,     // 支持图生图
+    textToImage: true, // 支持文生图
+    imageToImage: true, // 支持图生图
     multiImageFusion: true, // 支持多图融合
-    asyncTask: true,        // 必须使用异步轮询
-    maxInputImages: 10,     // 支持较多输入图片
-    maxOutputImages: 4,     // 文生图上限
-    maxEditOutputImages: 4, // 图生图上限
-    maxBlendOutputImages: 4, // 融合上限
+    asyncTask: true, // 必须使用异步轮询
+    maxInputImages: 10, // 支持较多输入图片
+    maxOutputImages: 16, // 支持并发生成多张
+    maxNativeOutputImages: 1, // 原生 API 单次只能生成 1 张
+    maxEditOutputImages: 16, // 图生图上限
+    maxBlendOutputImages: 16, // 融合上限
     outputFormats: ["url", "b64_json"], // 支持 URL 和 Base64 输出
   };
 
@@ -71,6 +76,8 @@ export class ModelScopeProvider extends BaseProvider {
     editModels: ModelScopeConfig.editModels,
     defaultEditModel: ModelScopeConfig.defaultEditModel,
     defaultEditSize: ModelScopeConfig.defaultEditSize,
+    blendModels: ModelScopeConfig.blendModels, // 支持融合模型配置
+    defaultBlendModel: ModelScopeConfig.defaultEditModel, // 默认融合模型同编辑模型
   };
 
   /**
@@ -83,252 +90,290 @@ export class ModelScopeProvider extends BaseProvider {
 
   /**
    * 执行图片生成请求
-   * 
-   * 处理流程：
-   * 1. 准备请求数据（处理输入图片，上传到图床）。
-   * 2. 提交异步任务。
-   * 3. 轮询任务状态直到完成。
-   * 4. 下载结果图片并转换为 Base64。
    */
   override async generate(
     apiKey: string,
     request: ImageGenerationRequest,
     options: GenerationOptions,
   ): Promise<GenerationResult> {
-    const startTime = Date.now();
-    const { requestId } = options;
     const hasImages = request.images && request.images.length > 0;
-    const apiType = hasImages ? "image_edit" : "generate_image";
-    const prompt = request.prompt || "";
-    const images = request.images || [];
 
-    logFullPrompt("ModelScope", requestId, prompt);
-    if (hasImages) logInputImages("ModelScope", requestId, images);
+    // 1. 确定最终的生成数量 n
+    // ModelScope 特殊逻辑：优先使用 WebUI 配置的 n (如果有)，覆盖请求中的 n
+    const n = this.selectCount(request.n, hasImages);
+    const requestWithCount = { ...request, n };
 
-    // 1. 智能选择模型和尺寸
-    const model = this.selectModel(request.model, hasImages);
-    const size = this.selectSize(request.size, hasImages);
+    // 使用 BaseProvider 的并发生成策略
+    return await this.generateWithConcurrency(
+      apiKey,
+      requestWithCount,
+      options,
+      async (singleRequest) => {
+        const startTime = Date.now();
+        logFullPrompt("ModelScope", options.requestId, singleRequest.prompt);
 
-    if (hasImages) {
-      info("ModelScope", `使用图生图模式, 模型: ${model}, 图片数量: ${images.length}`);
-    } else {
-      info("ModelScope", `使用文生图模式, 模型: ${model}`);
-    }
+        if (hasImages) {
+          logInputImages("ModelScope", options.requestId, singleRequest.images);
+          return await this.handleEdit(apiKey, singleRequest, options, startTime);
+        } else {
+          return await this.handleTextToImage(apiKey, singleRequest, options, startTime);
+        }
+      }
+    );
+  }
 
-    logImageGenerationStart("ModelScope", requestId, model, size, prompt.length);
+  /**
+   * 融合生图 (Blend) 实现
+   *
+   * 逻辑：提取 Messages 中的所有图片和 Prompt，转换为标准 ImageGenerationRequest，
+   * 然后复用 generate 逻辑。
+   */
+  override blend(
+    apiKey: string,
+    request: ImagesBlendRequest,
+    options: GenerationOptions,
+  ): Promise<GenerationResult> {
+    const { prompt, images } = this.extractPromptAndImagesFromMessages(request.messages);
+    const finalPrompt = request.prompt || prompt || "";
 
-    interface ModelScopeRequest {
-      model: string;
-      prompt: string;
-      size?: string;
-      n?: number;
-      image_url?: string[];
-    }
+    // 融合生图通常使用编辑模型
+    const model = request.model || this.config.defaultBlendModel || this.config.defaultEditModel;
 
-    const requestBody: ModelScopeRequest = {
+    return this.generate(apiKey, {
+      prompt: finalPrompt,
+      images,
       model: model,
-      prompt: prompt || "A beautiful scenery",
+      n: request.n,
+      size: request.size,
+      response_format: "b64_json",
+    }, options);
+  }
+
+  /**
+   * 从消息列表中提取 Prompt 和图片
+   * (复用自 GiteeProvider 的逻辑)
+   */
+  private extractPromptAndImagesFromMessages(
+    messages: Message[],
+  ): { prompt: string; images: string[] } {
+    const images: string[] = [];
+
+    for (const msg of messages) {
+      if (!Array.isArray(msg.content)) continue;
+      for (const item of msg.content) {
+        if (item.type === "image_url" && item.image_url?.url) {
+          images.push(item.image_url.url);
+        }
+        if (item.type === "image") {
+          const nonStandard = item as NonStandardImageContentItem;
+          const mediaType = nonStandard.mediaType || "image/png";
+          const base64Str = nonStandard.image;
+          images.push(
+            base64Str.startsWith("data:") ? base64Str : `data:${mediaType};base64,${base64Str}`,
+          );
+        }
+      }
+    }
+
+    const prompt = this.extractPromptFromLastUserMessage(messages);
+    return { prompt, images };
+  }
+
+  private extractPromptFromLastUserMessage(messages: Message[]): string {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (!msg || msg.role !== "user") continue;
+
+      if (typeof msg.content === "string") return msg.content.trim();
+      if (Array.isArray(msg.content)) {
+        const parts: string[] = [];
+        for (const item of msg.content as MessageContentItem[]) {
+          if (item.type === "text") parts.push(item.text);
+        }
+        return parts.join(" ").trim();
+      }
+    }
+    return "";
+  }
+
+  /**
+   * 处理文生图请求
+   */
+  private async handleTextToImage(
+    apiKey: string,
+    request: ImageGenerationRequest,
+    options: GenerationOptions,
+    startTime: number,
+  ): Promise<GenerationResult> {
+    const model = this.selectModel(request.model, false);
+    const size = this.selectSize(request.size, false);
+    // 此时的 request.n 已经是拆分后的值 (通常为 1)，所以直接使用
+    const n = request.n || 1;
+
+    logImageGenerationStart("ModelScope", options.requestId, model, size, request.prompt.length);
+    info("ModelScope", `使用文生图模式, 模型: ${model}, n: ${n}`);
+
+    const requestBody: Record<string, unknown> = {
+      model,
+      prompt: request.prompt || "A beautiful scenery",
+      size: size,
+      n: n,
     };
 
-    if (!hasImages) {
+    return await this.submitAndPoll(
+      apiKey,
+      "generate_image",
+      requestBody,
+      options,
+      startTime,
+      model,
+    );
+  }
+
+  /**
+   * 处理图生图/融合生图请求
+   */
+  private async handleEdit(
+    apiKey: string,
+    request: ImageGenerationRequest,
+    options: GenerationOptions,
+    startTime: number,
+  ): Promise<GenerationResult> {
+    const model = this.selectModel(request.model, true);
+    // 图生图通常不需要 size，或者 size 必须符合特定比例。
+    // 这里我们传入 size，但魔搭文档示例里有些模型可能不需要 size。
+    // 既然 config 里有 defaultEditSize，我们还是传进去。
+    const size = this.selectSize(request.size, true);
+    // 此时的 request.n 已经是拆分后的值 (通常为 1)
+    const n = request.n || 1;
+
+    info("ModelScope", `使用图生图/融合模式, 模型: ${model}, 图片数量: ${request.images.length}, n: ${n}`);
+    logImageGenerationStart("ModelScope", options.requestId, model, size, request.prompt.length);
+
+    // 处理输入图片：上传到图床获取 URL
+    const urlImages: string[] = [];
+    for (let i = 0; i < request.images.length; i++) {
+      const img = request.images[i];
+      if (img.startsWith("http")) {
+        urlImages.push(img);
+        continue;
+      }
+
+      const dataUri = img.startsWith("data:") ? img : buildDataUri(img, "image/png");
+      try {
+        const imageUrl = await base64ToUrl(dataUri);
+        urlImages.push(imageUrl);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        const errMsg = `第${i + 1}张输入图片上传图床失败: ${msg}`;
+        logImageGenerationFailed("ModelScope", options.requestId, errMsg);
+        throw new Error(errMsg);
+      }
+    }
+
+    if (urlImages.length === 0) {
+      throw new Error("图生图失败：无可用输入图片 URL");
+    }
+
+    info("ModelScope", `发送 ${urlImages.length} 张图片 URL 给魔搭 API`);
+
+    const requestBody: Record<string, unknown> = {
+      model: model,
+      prompt: request.prompt || "A beautiful scenery",
+      n: n,
+      image_url: urlImages,
+    };
+
+    // 如果是编辑模式，是否需要 size？文档示例里 Z-Image-Turbo 文生图用了 size，Qwen-Image-Edit 用了 image_url 列表。
+    // Qwen-Image-Edit 示例里没传 size，但文档表格说 size 是可选的。
+    // 为了稳妥，如果不为空则传。
+    if (size) {
       requestBody.size = size;
-      requestBody.n = 1;
     }
 
-    // 2. 处理输入图片
-    // ModelScope API 需要公网可访问的图片 URL，不支持直接传 Base64。
-    // 如果输入是 Base64，需要先上传到图床。
-    if (hasImages) {
-      const urlImages: string[] = [];
-      for (let i = 0; i < images.length; i++) {
-        const img = images[i];
-        if (img.startsWith("http")) {
-          urlImages.push(img);
-          continue;
-        }
+    return await this.submitAndPoll(apiKey, "image_edit", requestBody, options, startTime, model);
+  }
 
-        const dataUri = img.startsWith("data:") ? img : buildDataUri(img, "image/png");
-        try {
-          const imageUrl = await base64ToUrl(dataUri);
-          urlImages.push(imageUrl);
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          const errMsg = `第${i + 1}张输入图片上传图床失败: ${msg}`;
-          logImageGenerationFailed("ModelScope", requestId, errMsg);
-          return { success: false, error: errMsg, duration: Date.now() - startTime };
-        }
-      }
+  /**
+   * 通用提交和轮询逻辑
+   */
+  private async submitAndPoll(
+    apiKey: string,
+    apiType: string,
+    requestBody: Record<string, unknown>,
+    options: GenerationOptions,
+    startTime: number,
+    model: string,
+  ): Promise<GenerationResult> {
+    const { requestId } = options;
 
-      if (urlImages.length === 0) {
-        const errMsg = "图生图失败：无可用输入图片 URL";
-        logImageGenerationFailed("ModelScope", requestId, errMsg);
-        return { success: false, error: errMsg, duration: Date.now() - startTime };
-      }
+    // 1. 提交任务
+    const submitResponse = await withApiTiming(
+      "ModelScope",
+      apiType,
+      () =>
+        fetchWithTimeout(`${ModelScopeConfig.apiUrl}/images/generations`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${apiKey}`,
+            "X-ModelScope-Async-Mode": "true", // 强制启用异步模式
+          },
+          body: JSON.stringify(requestBody),
+        }, options.timeoutMs),
+    );
 
-      requestBody.image_url = urlImages;
-      info("ModelScope", `发送 ${urlImages.length} 张图片 URL 给魔搭 API:`);
-      urlImages.forEach((url, index) => {
-        info("ModelScope", `  ${index + 1}. ${url} (成功)`);
-      });
-    }
-
-    const submit = (body: ModelScopeRequest): Promise<Response> =>
-      withApiTiming(
-        "ModelScope",
-        apiType,
-        () =>
-          fetchWithTimeout(`${ModelScopeConfig.apiUrl}/images/generations`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${apiKey}`,
-              "X-ModelScope-Async-Mode": "true", // 强制启用异步模式
-            },
-            body: JSON.stringify(body),
-          }),
-      );
-
-    // 3. 提交任务
-    const submitResponse = await submit(requestBody);
     if (!submitResponse.ok) {
       const errorText = await submitResponse.text();
       const friendlyError = parseErrorMessage(errorText, submitResponse.status, "ModelScope");
       logImageGenerationFailed("ModelScope", requestId, friendlyError);
-      return {
-        success: false,
-        error: friendlyError,
-        duration: Date.now() - startTime,
-      };
+      throw new Error(friendlyError);
     }
 
     const submitData: { task_id?: unknown; [key: string]: unknown } = await submitResponse.json();
+    const taskId = String(submitData.task_id || "");
 
-    const taskId = typeof submitData.task_id === "string"
-      ? submitData.task_id
-      : (typeof submitData.task_id === "number" && Number.isFinite(submitData.task_id))
-      ? String(submitData.task_id)
-      : "";
     if (!taskId) {
       const errMsg = "ModelScope 任务提交失败：未返回 task_id";
       logImageGenerationFailed("ModelScope", requestId, errMsg);
-      return { success: false, error: errMsg, duration: Date.now() - startTime };
+      throw new Error(errMsg);
     }
 
     info("ModelScope", `任务已提交, Task ID: ${taskId}`);
 
-    // 4. 轮询任务状态
-    const maxAttempts = 120; // 10分钟超时 (120次 × 5秒)
+    // 2. 轮询任务状态
+    const maxAttempts = 120; // 10分钟超时
     let pollingAttempts = 0;
     let invalidResponseStreak = 0;
-
-    // 辅助函数：标准化任务数据
-    const normalizeTaskData = (raw: unknown): Record<string, unknown> | null => {
-      if (!raw || typeof raw !== "object") return null;
-      const r = raw as Record<string, unknown>;
-
-      // 只要有 task_status 就视为有效响应
-      // ModelScope 的 image_generation 接口在查询 image_edit 任务时，
-      // 可能会在 PENDING 阶段返回 task_id 为空的响应，这是正常现象，必须接受，否则会误判为失败。
-      if (typeof r.task_status === "string") return r;
-
-      const nested = r.data ?? r.Data;
-      if (nested && typeof nested === "object") {
-        const n = nested as Record<string, unknown>;
-        if (typeof n.task_status === "string") return n;
-      }
-
-      return null;
-    };
-
-    // 辅助函数：提取输出图片 URL
-    const extractOutputImages = (data: Record<string, unknown>): string[] => {
-      const direct = data.output_images;
-      if (Array.isArray(direct)) {
-        return direct.filter((v): v is string => typeof v === "string" && v.length > 0);
-      }
-
-      const outputs = data.outputs;
-      if (outputs && typeof outputs === "object") {
-        const out = outputs as Record<string, unknown>;
-        const nested = out.output_images;
-        if (Array.isArray(nested)) {
-          return nested.filter((v): v is string => typeof v === "string" && v.length > 0);
-        }
-      }
-
-      return [];
-    };
-
-    // 优先使用 image_generation，因为绝大多数图生图任务也使用此类型查询
-    // video_generation 作为备选，防止某些特殊模型被归类为视频
-    const taskTypeOrder: Array<string | undefined> = ["image_generation", "video_generation"];
-
     let lastPollError: string | null = null;
 
-    const getTaskStatus = async (taskType?: string): Promise<Record<string, unknown> | null> => {
-      const headers: Record<string, string> = {
-        "Authorization": `Bearer ${apiKey}`,
-      };
-      if (taskType) {
-        headers["X-ModelScope-Task-Type"] = taskType;
-      }
+    // 优先使用 image_generation，因为绝大多数图生图任务也使用此类型查询
+    const taskTypeOrder: Array<string | undefined> = ["image_generation", "video_generation"];
 
-      const url = new URL(`${ModelScopeConfig.apiUrl}/tasks/${taskId}`);
-
-      const checkResponse = await fetchWithTimeout(url.toString(), {
-        method: "GET",
-        headers,
-      });
-
-      if (!checkResponse.ok) {
-        const errorText = await checkResponse.text();
-        lastPollError = `HTTP ${checkResponse.status}(${taskType ?? "default"}): ${errorText.substring(0, 200)}`;
-        warn("ModelScope", `轮询失败 (${checkResponse.status}): ${errorText}`);
-        return null;
-      }
-
-      const json = (await checkResponse.json()) as unknown;
-      const normalized = normalizeTaskData(json);
-      if (!normalized) {
-        lastPollError = `异常响应(${taskType ?? "default"}): ${JSON.stringify(json).substring(0, 200)}`;
-        if (pollingAttempts <= 3 || pollingAttempts % 10 === 0) {
-          debug(
-            "ModelScope",
-            `⚠️ 轮询返回疑似异常响应: ${JSON.stringify(json).substring(0, 200)}`,
-          );
-        }
-        return null;
-      }
-
-      return normalized;
-    };
-
-    // 轮询循环
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise((resolve) => setTimeout(resolve, 5000));
       pollingAttempts++;
 
-      let checkData: Record<string, unknown> | null = null;
+      let taskData: Record<string, unknown> | null = null;
       for (const taskType of taskTypeOrder) {
-        checkData = await getTaskStatus(taskType);
-        if (checkData) {
-          if (pollingAttempts <= 1) {
-             info("ModelScope", `✅ 成功连接任务状态，使用类型: ${taskType ?? "default"}`);
-          }
+        const result = await this.getTaskStatus(apiKey, taskId, taskType, options.timeoutMs);
+        if (result.data) {
+          taskData = result.data;
           break;
+        }
+        if (result.error) {
+          lastPollError = result.error;
         }
       }
 
-      if (!checkData) {
+      if (!taskData) {
         invalidResponseStreak++;
         if (invalidResponseStreak >= 6) {
-          const errMsg = `ModelScope 任务状态查询返回异常：${lastPollError ?? "可能任务类型不匹配或任务不存在"}`;
+          const errMsg = `ModelScope 任务状态查询返回异常：${
+            lastPollError ?? "可能任务类型不匹配或任务不存在"
+          }`;
           logImageGenerationFailed("ModelScope", requestId, errMsg);
-          return {
-            success: false,
-            error: errMsg,
-            duration: Date.now() - startTime,
-          };
+          throw new Error(errMsg);
         }
         continue;
       }
@@ -336,33 +381,22 @@ export class ModelScopeProvider extends BaseProvider {
       invalidResponseStreak = 0;
 
       if (pollingAttempts <= 3 || pollingAttempts % 10 === 0) {
-        info(
-          "ModelScope",
-          `📊 轮询响应 (第${pollingAttempts}次): ${JSON.stringify(checkData).substring(0, 200)}`,
-        );
+        info("ModelScope", `📊 轮询响应 (第${pollingAttempts}次): ${taskData.task_status}`);
       }
 
-      const status = checkData.task_status;
+      const status = taskData.task_status;
 
       if (status === "SUCCEED") {
-        const outputImageUrls = extractOutputImages(checkData);
-
-        const imageData = outputImageUrls.map((url: string) => ({ url }));
-        logGeneratedImages("ModelScope", requestId, imageData);
-
+        const outputImageUrls = this.extractOutputImages(taskData);
         const duration = Date.now() - startTime;
-        const imageCount = outputImageUrls.length;
-        logImageGenerationComplete("ModelScope", requestId, imageCount, duration);
 
-        // 5. 转换为 Base64 实现永久保存
+        logImageGenerationComplete("ModelScope", requestId, outputImageUrls.length, duration);
+
+        // 转换为 Base64
         const results: Array<{ url?: string; b64_json?: string }> = [];
         for (const url of outputImageUrls) {
-          info("ModelScope", `📎 原始图片 URL: ${url}`);
-          info("ModelScope", `正在下载图片并转换为 Base64...`);
           try {
-            const { base64, mimeType } = await urlToBase64(url);
-            const sizeKB = Math.round(base64.length / 1024);
-            info("ModelScope", `✅ 图片已转换为 Base64, MIME: ${mimeType}, 大小: ${sizeKB}KB`);
+            const { base64 } = await urlToBase64(url);
             results.push({ b64_json: base64 });
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
@@ -371,34 +405,86 @@ export class ModelScopeProvider extends BaseProvider {
           }
         }
 
-        info("ModelScope", `任务成功完成, 耗时: ${pollingAttempts}次轮询`);
-
         return {
           success: true,
           images: results,
+          model,
+          provider: "ModelScope",
           duration,
         };
       } else if (status === "FAILED") {
-        error("ModelScope", "任务失败");
-        const failReason = checkData.errors || checkData.error || checkData.message || JSON.stringify(checkData);
+        const failReason = taskData.errors || taskData.error || taskData.message ||
+          JSON.stringify(taskData);
         logImageGenerationFailed("ModelScope", requestId, `Task Failed: ${failReason}`);
-        return {
-          success: false,
-          error: `ModelScope Task Failed: ${failReason}`,
-          duration: Date.now() - startTime,
-        };
-      } else {
-        debug("ModelScope", `状态: ${status} (第${i + 1}次)`);
+        throw new Error(`ModelScope Task Failed: ${failReason}`);
       }
     }
 
-    error("ModelScope", "任务超时");
     logImageGenerationFailed("ModelScope", requestId, "任务超时");
-    return {
-      success: false,
-      error: "ModelScope Task Timeout",
-      duration: Date.now() - startTime,
+    throw new Error("ModelScope Task Timeout");
+  }
+
+  private async getTaskStatus(
+    apiKey: string,
+    taskId: string,
+    taskType?: string,
+    timeoutMs?: number,
+  ): Promise<{ data: Record<string, unknown> | null; error?: string }> {
+    const headers: Record<string, string> = {
+      "Authorization": `Bearer ${apiKey}`,
     };
+    if (taskType) {
+      headers["X-ModelScope-Task-Type"] = taskType;
+    }
+
+    try {
+      const checkResponse = await fetchWithTimeout(`${ModelScopeConfig.apiUrl}/tasks/${taskId}`, {
+        method: "GET",
+        headers,
+      }, timeoutMs);
+
+      if (!checkResponse.ok) {
+        return { data: null, error: `HTTP ${checkResponse.status}` };
+      }
+
+      const json = await checkResponse.json() as unknown;
+      return { data: this.normalizeTaskData(json) };
+    } catch (e) {
+      return { data: null, error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  private normalizeTaskData(raw: unknown): Record<string, unknown> | null {
+    if (!raw || typeof raw !== "object") return null;
+    const r = raw as Record<string, unknown>;
+
+    if (typeof r.task_status === "string") return r;
+
+    const nested = r.data ?? r.Data;
+    if (nested && typeof nested === "object") {
+      const n = nested as Record<string, unknown>;
+      if (typeof n.task_status === "string") return n;
+    }
+
+    return null;
+  }
+
+  private extractOutputImages(data: Record<string, unknown>): string[] {
+    const direct = data.output_images;
+    if (Array.isArray(direct)) {
+      return direct.filter((v): v is string => typeof v === "string" && v.length > 0);
+    }
+
+    const outputs = data.outputs;
+    if (outputs && typeof outputs === "object") {
+      const out = outputs as Record<string, unknown>;
+      const nested = out.output_images;
+      if (Array.isArray(nested)) {
+        return nested.filter((v): v is string => typeof v === "string" && v.length > 0);
+      }
+    }
+
+    return [];
   }
 }
 

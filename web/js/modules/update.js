@@ -1,13 +1,13 @@
-import { apiFetch } from './utils.js';
+import { apiFetch } from "./utils.js";
 
 /**
  * 渲染更新检查页面
  * @param {HTMLElement} container - 主内容容器
  */
 export async function renderUpdate(container) {
-    // 注入页面样式
-    const style = document.createElement('style');
-    style.textContent = `
+  // 注入页面样式
+  const style = document.createElement("style");
+  style.textContent = `
         .update-container {
             max-width: 800px;
             margin: 0 auto;
@@ -162,9 +162,9 @@ export async function renderUpdate(container) {
         }
         @keyframes spin { to { transform: rotate(360deg); } }
     `;
-    container.appendChild(style);
+  container.appendChild(style);
 
-    container.innerHTML += `
+  container.innerHTML += `
         <div class="update-container">
             <div class="version-card">
                 <div class="version-header">
@@ -184,44 +184,49 @@ export async function renderUpdate(container) {
         </div>
     `;
 
+  try {
+    // 1. 获取本地版本
+    const localRes = await apiFetch("/api/info");
+    if (!localRes.ok) {
+      throw new Error(`本地版本信息获取失败: ${localRes.status}`);
+    }
+    const localInfo = await localRes.json();
+    const localVersionRaw = (localInfo && localInfo.version) ? String(localInfo.version) : "0.0.0";
+    const localVersion = normalizeVersion(localVersionRaw);
+
+    // 2. 获取 GitHub 最新版本
+    const response = await fetch(
+      "https://api.github.com/repos/lianwusuoai/img-router/releases/latest",
+    );
+    if (!response.ok) {
+      throw new Error(`GitHub API 请求失败: ${response.status}`);
+    }
+    const release = await response.json();
+    const latestVersion = release.tag_name ? release.tag_name.replace(/^v/, "") : "0.0.0";
+    const latestVersionNorm = normalizeVersion(latestVersion);
+
+    // 3. 比较版本
+    let hasUpdate = false;
+    let versionError = null;
     try {
-        // 1. 获取本地版本
-        const localRes = await apiFetch('/api/info');
-        if (!localRes.ok) {
-            throw new Error(`本地版本信息获取失败: ${localRes.status}`);
-        }
-        const localInfo = await localRes.json();
-        const localVersionRaw = (localInfo && localInfo.version) ? String(localInfo.version) : '0.0.0';
-        const localVersion = normalizeVersion(localVersionRaw);
+      const comparison = compareVersions(latestVersionNorm, localVersion);
+      hasUpdate = comparison > 0;
+    } catch (err) {
+      console.warn("Version comparison failed:", err);
+      versionError = err;
+    }
 
-        // 2. 获取 GitHub 最新版本
-        const response = await fetch('https://api.github.com/repos/lianwusuoai/img-router/releases/latest');
-        if (!response.ok) {
-            throw new Error(`GitHub API 请求失败: ${response.status}`);
-        }
-        const release = await response.json();
-        const latestVersion = release.tag_name ? release.tag_name.replace(/^v/, '') : '0.0.0';
-        const latestVersionNorm = normalizeVersion(latestVersion);
-        
-        // 3. 比较版本
-        let hasUpdate = false;
-        let versionError = null;
-        try {
-            const comparison = compareVersions(latestVersionNorm, localVersion);
-            hasUpdate = comparison > 0;
-        } catch (err) {
-            console.warn('Version comparison failed:', err);
-            versionError = err;
-        }
+    const releaseNotesHtml = await renderMarkdownToHtml(
+      release.body || "",
+      "lianwusuoai/img-router",
+    );
 
-        const releaseNotesHtml = await renderMarkdownToHtml(release.body || '', 'lianwusuoai/img-router');
+    // 4. 渲染结果
+    const contentDiv = container.querySelector("#update-content");
 
-        // 4. 渲染结果
-        const contentDiv = container.querySelector('#update-content');
-        
-        let alertHtml = '';
-        if (versionError) {
-             alertHtml = `
+    let alertHtml = "";
+    if (versionError) {
+      alertHtml = `
                 <div class="alert-box alert-warning">
                     <i class="ri-error-warning-line" style="font-size: 20px;"></i>
                     <div>
@@ -230,8 +235,8 @@ export async function renderUpdate(container) {
                     </div>
                 </div>
             `;
-        } else if (hasUpdate) {
-            alertHtml = `
+    } else if (hasUpdate) {
+      alertHtml = `
                 <div class="alert-box alert-warning">
                     <i class="ri-notification-badge-line" style="font-size: 20px;"></i>
                     <div>
@@ -240,8 +245,8 @@ export async function renderUpdate(container) {
                     </div>
                 </div>
             `;
-        } else {
-            alertHtml = `
+    } else {
+      alertHtml = `
                 <div class="alert-box alert-success">
                     <i class="ri-checkbox-circle-line" style="font-size: 20px;"></i>
                     <div>
@@ -250,24 +255,28 @@ export async function renderUpdate(container) {
                     </div>
                 </div>
             `;
-        }
+    }
 
-        contentDiv.innerHTML = `
+    contentDiv.innerHTML = `
             ${alertHtml}
             
             <div class="version-status-row">
                 <div class="status-item">
                     <span class="status-label">当前版本</span>
-                    <span class="status-value">${formatVersionForDisplay(localVersionRaw)} <span class="badge badge-current">Local</span></span>
+                    <span class="status-value">${
+      formatVersionForDisplay(localVersionRaw)
+    } <span class="badge badge-current">Local</span></span>
                 </div>
                 <div class="status-item">
                     <span class="status-label">最新版本</span>
-                    <span class="status-value">${formatVersionForDisplay(latestVersionNorm)} <span class="badge badge-new">Latest</span></span>
+                    <span class="status-value">${
+      formatVersionForDisplay(latestVersionNorm)
+    } <span class="badge badge-new">Latest</span></span>
                 </div>
                 <div class="status-item">
                     <span class="status-label">发布时间</span>
                     <span class="status-value" style="font-size: 1rem; font-weight: normal;">
-                        ${new Date(release.published_at).toLocaleString('zh-CN')}
+                        ${new Date(release.published_at).toLocaleString("zh-CN")}
                     </span>
                 </div>
             </div>
@@ -279,11 +288,10 @@ export async function renderUpdate(container) {
                 ${releaseNotesHtml}
             </div>
         `;
-
-    } catch (e) {
-        console.error('Check update failed:', e);
-        const contentDiv = container.querySelector('#update-content');
-        contentDiv.innerHTML = `
+  } catch (e) {
+    console.error("Check update failed:", e);
+    const contentDiv = container.querySelector("#update-content");
+    contentDiv.innerHTML = `
             <div class="alert-box alert-warning">
                 <i class="ri-error-warning-line"></i>
                 <div>
@@ -297,65 +305,65 @@ export async function renderUpdate(container) {
                 </button>
             </div>
         `;
-    }
+  }
 }
 
 function formatVersionForDisplay(version) {
-    const v = (version === undefined || version === null) ? '' : String(version).trim();
-    if (!v) return 'v0.0.0';
-    return v.startsWith('v') ? v : `v${v}`;
+  const v = (version === undefined || version === null) ? "" : String(version).trim();
+  if (!v) return "v0.0.0";
+  return v.startsWith("v") ? v : `v${v}`;
 }
 
 function normalizeVersion(version) {
-    const v = (version === undefined || version === null) ? '' : String(version).trim();
-    if (!v) return '0.0.0';
-    return v.replace(/^v/i, '');
+  const v = (version === undefined || version === null) ? "" : String(version).trim();
+  if (!v) return "0.0.0";
+  return v.replace(/^v/i, "");
 }
 
 async function renderMarkdownToHtml(markdown, context) {
-    const text = (markdown === undefined || markdown === null) ? '' : String(markdown);
-    if (!text.trim()) {
-        return '<p>暂无更新日志</p>';
-    }
+  const text = (markdown === undefined || markdown === null) ? "" : String(markdown);
+  if (!text.trim()) {
+    return "<p>暂无更新日志</p>";
+  }
 
+  try {
+    const res = await fetch("https://api.github.com/markdown", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        text,
+        mode: "gfm",
+        context,
+      }),
+    });
+
+    if (res.ok) {
+      return await res.text();
+    }
+  } catch {
+    0;
+  }
+
+  if (globalThis.marked) {
     try {
-        const res = await fetch('https://api.github.com/markdown', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                text,
-                mode: 'gfm',
-                context
-            })
-        });
-
-        if (res.ok) {
-            return await res.text();
-        }
+      return globalThis.marked.parse(text);
     } catch {
-        0;
+      0;
     }
+  }
 
-    if (globalThis.marked) {
-        try {
-            return globalThis.marked.parse(text);
-        } catch {
-            0;
-        }
-    }
-
-    return `<pre style="white-space: pre-wrap; word-break: break-word;">${escapeHtml(text)}</pre>`;
+  return `<pre style="white-space: pre-wrap; word-break: break-word;">${escapeHtml(text)}</pre>`;
 }
 
 function escapeHtml(input) {
-    return String(input)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
+  return String(input)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 /**
@@ -365,17 +373,17 @@ function escapeHtml(input) {
  * @returns {number} 1: v1 > v2, -1: v1 < v2, 0: equal
  */
 function compareVersions(v1, v2) {
-    if (!v1) v1 = "0.0.0";
-    if (!v2) v2 = "0.0.0";
-    const p1 = String(v1).split('.').map(Number);
-    const p2 = String(v2).split('.').map(Number);
-    const len = Math.max(p1.length, p2.length);
-    
-    for (let i = 0; i < len; i++) {
-        const n1 = p1[i] || 0;
-        const n2 = p2[i] || 0;
-        if (n1 > n2) return 1;
-        if (n1 < n2) return -1;
-    }
-    return 0;
+  if (!v1) v1 = "0.0.0";
+  if (!v2) v2 = "0.0.0";
+  const p1 = String(v1).split(".").map(Number);
+  const p2 = String(v2).split(".").map(Number);
+  const len = Math.max(p1.length, p2.length);
+
+  for (let i = 0; i < len; i++) {
+    const n1 = p1[i] || 0;
+    const n2 = p2[i] || 0;
+    if (n1 > n2) return 1;
+    if (n1 < n2) return -1;
+  }
+  return 0;
 }

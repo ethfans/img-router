@@ -1,6 +1,6 @@
 /**
  * @fileoverview 日志中间件
- * 
+ *
  * 提供全链路的请求日志记录功能，包括：
  * 1. 请求上下文创建 (Request ID 生成)
  * 2. 智能日志过滤 (忽略静态资源和特定端点)
@@ -9,10 +9,10 @@
  */
 
 import {
+  debug,
   error as logError,
   generateRequestId,
   info,
-  debug,
   logRequestEnd,
   warn,
 } from "../core/logger.ts";
@@ -39,7 +39,7 @@ export interface RequestContext {
 /**
  * 创建请求上下文
  * 为每个新请求生成唯一的 ID 和开始时间
- * 
+ *
  * @param {Request} req - 原始请求对象
  * @returns {RequestContext} 请求上下文
  */
@@ -62,29 +62,31 @@ export function createRequestContext(req: Request): RequestContext {
 /**
  * 判断是否为静态资源请求
  * 基于文件扩展名进行判断
- * 
+ *
  * @param {string} pathname - 请求路径
  * @returns {boolean} 是否为静态资源
  */
 function isStaticResource(pathname: string): boolean {
-  const ext = pathname.split('.').pop()?.toLowerCase();
-  return !!ext && ['css', 'js', 'jpg', 'jpeg', 'png', 'gif', 'ico', 'svg', 'woff', 'woff2', 'ttf', 'map'].includes(ext);
+  const ext = pathname.split(".").pop()?.toLowerCase();
+  return !!ext &&
+    ["css", "js", "jpg", "jpeg", "png", "gif", "ico", "svg", "woff", "woff2", "ttf", "map"]
+      .includes(ext);
 }
 
 /**
  * 判断是否为需要忽略的内部端点
  * 例如日志流本身的请求，如果不忽略会导致日志死循环
- * 
+ *
  * @param {string} pathname - 请求路径
  * @returns {boolean} 是否应忽略
  */
 function isIgnoredEndpoint(pathname: string): boolean {
-  return pathname === '/api/logs/stream';
+  return pathname === "/api/logs/stream";
 }
 
 /**
  * 记录请求完成日志
- * 
+ *
  * @param {RequestContext} ctx - 请求上下文
  * @param {number} statusCode - HTTP 状态码
  * @param {string} [errorMessage] - 可选的错误消息
@@ -131,7 +133,7 @@ export type Handler = (
 /**
  * 日志中间件高阶函数
  * 包装原始处理函数，添加自动日志记录和错误处理能力
- * 
+ *
  * @param {Handler} handler - 原始业务处理函数
  * @returns {Function} 包装后的请求处理函数
  * \
@@ -164,7 +166,7 @@ export function withLogging(handler: Handler): (req: Request) => Promise<Respons
     } catch (err) {
       // 统一错误捕获
       const errorMessage = err instanceof Error ? err.message : String(err);
-      
+
       // 记录错误日志
       logError(MODULE, `请求处理错误: ${errorMessage}`);
       await completeRequestLog(ctx, 500, errorMessage);
@@ -188,7 +190,7 @@ export function withLogging(handler: Handler): (req: Request) => Promise<Respons
 
 /**
  * 记录路由决策信息
- * 
+ *
  * @param {string} provider - 选定的服务提供商
  * @param {string} endpoint - 目标端点
  */
@@ -198,7 +200,7 @@ export function logRouting(provider: string, endpoint: string): void {
 
 /**
  * 记录认证警告信息
- * 
+ *
  * @param {string} message - 警告内容
  */
 export function logAuthWarning(message: string): void {
@@ -207,7 +209,7 @@ export function logAuthWarning(message: string): void {
 
 /**
  * 记录处理程序内部错误
- * 
+ *
  * @param {string} provider - 相关提供商
  * @param {string} message - 错误详情
  */

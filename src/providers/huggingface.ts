@@ -34,7 +34,7 @@ import {
 } from "../core/logger.ts";
 import { withApiTiming } from "../middleware/timing.ts";
 
-/** 
+/**
  * 将图片（URL 或 Base64）转换为 Blob 对象
  * 用于上传到 Gradio 服务器。
  *
@@ -59,8 +59,8 @@ async function imageToBlob(imageSource: string): Promise<Blob> {
   }
 }
 
-/** 
- * 简单的 Prompt 清洗函数 
+/**
+ * 简单的 Prompt 清洗函数
  * 去除可能导致 Gradio 接口报错的控制字符。
  */
 function sanitizePrompt(prompt: string): string {
@@ -70,7 +70,7 @@ function sanitizePrompt(prompt: string): string {
   return prompt.replace(/[\x00-\x1F\x7F]/g, " ").trim();
 }
 
-/** 
+/**
  * 从 SSE 流中提取图片 URL
  * 解析 Gradio 协议的 SSE 数据流，查找生成的图片路径。
  *
@@ -153,7 +153,7 @@ function extractImageUrlFromSSE(sseStream: string, baseUrl?: string): string | n
 
 /**
  * HuggingFace Provider 实现类
- * 
+ *
  * 封装了对 Hugging Face Space 上 Gradio 应用的调用。
  * 核心功能是管理多个 API URL 的故障转移。
  */
@@ -165,12 +165,12 @@ export class HuggingFaceProvider extends BaseProvider {
    * Provider 能力描述
    */
   readonly capabilities: ProviderCapabilities = {
-    textToImage: true,      // 支持文生图
-    imageToImage: true,     // 支持图生图
+    textToImage: true, // 支持文生图
+    imageToImage: true, // 支持图生图
     multiImageFusion: true, // 支持多图融合
-    asyncTask: true,        // 实际上是长连接等待，被视为异步
-    maxInputImages: 3,      // 最多支持 3 张输入图片
-    maxOutputImages: 1,     // 最多支持生成 1 张图片
+    asyncTask: true, // 实际上是长连接等待，被视为异步
+    maxInputImages: 3, // 最多支持 3 张输入图片
+    maxOutputImages: 1, // 最多支持生成 1 张图片
     maxEditOutputImages: 1,
     maxBlendOutputImages: 1,
     outputFormats: ["url", "b64_json"], // 支持 URL 和 Base64 输出
@@ -199,7 +199,7 @@ export class HuggingFaceProvider extends BaseProvider {
 
   /**
    * 执行图片生成请求
-   * 
+   *
    * 根据是否有输入图片，分发到文生图或图生图处理逻辑。
    */
   override async generate(
@@ -216,9 +216,10 @@ export class HuggingFaceProvider extends BaseProvider {
     logFullPrompt("HuggingFace", requestId, prompt);
     if (hasImages) logInputImages("HuggingFace", requestId, images);
 
-    const headers: Record<string, string> = { 
+    const headers: Record<string, string> = {
       "Content-Type": "application/json",
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     };
     if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
 
@@ -231,7 +232,7 @@ export class HuggingFaceProvider extends BaseProvider {
 
   /**
    * 处理文生图请求
-   * 
+   *
    * 特性：
    * 1. 遍历配置的 API URL 列表进行尝试（故障转移）。
    * 2. 提交任务 -> 获取 Event ID -> 获取结果 (SSE)。
@@ -261,7 +262,7 @@ export class HuggingFaceProvider extends BaseProvider {
     const requestBody = JSON.stringify({
       data: [prompt, height || defaultHeight, width || defaultWidth, 9, seed, false],
     });
-    
+
     debug("HuggingFace", `Request Body: ${requestBody}`);
 
     const apiUrls = HuggingFaceConfig.apiUrls;
@@ -369,7 +370,7 @@ export class HuggingFaceProvider extends BaseProvider {
 
   /**
    * 处理图生图请求
-   * 
+   *
    * 特性：
    * 1. 同样支持多 URL 故障转移。
    * 2. 需要先将图片上传到 Gradio 服务器，获取内部路径。

@@ -1,6 +1,6 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import process from 'node:process';
+import fs from "node:fs";
+import path from "node:path";
+import process from "node:process";
 
 /**
  * 服务器配置接口
@@ -268,12 +268,12 @@ export interface KeyPoolItem {
   /** 所属提供商 */
   provider: string;
   /** 密钥状态 */
-  status: 'active' | 'disabled' | 'rate_limited';
+  status: "active" | "disabled" | "rate_limited";
   /** 最后使用时间戳 */
   lastUsed?: number;
   /** 错误计数 */
   errorCount?: number;
-  
+
   // 扩展字段
   id?: string;
   name?: string;
@@ -317,7 +317,7 @@ export interface SystemConfig {
   modes?: ModesConfig;
   /** 可扩展的其他系统级动态设置 */
   // deno-lint-ignore no-explicit-any
-  [key: string]: any; 
+  [key: string]: any;
 }
 
 /**
@@ -370,8 +370,20 @@ export const SIZE_MAPPING: Record<string, string> = {
   "21:9": "3024x1296",
 };
 
-/** 
- * 默认应用配置 
+/** ModelScope 支持的尺寸列表 (基于 Qwen-Image 能力) */
+export const MODELSCOPE_SIZES = [
+  "1024x1024", // 1:1
+  "1280x720", // 16:9
+  "720x1280", // 9:16
+  "1024x768", // 4:3
+  "768x1024", // 3:4
+  "2048x2048", // 1:1 高清
+  "2560x1440", // 16:9 高清
+  "1440x2560", // 9:16 高清
+];
+
+/**
+ * 默认应用配置
  * 包含所有服务的初始设置
  */
 const DEFAULT_CONFIG: AppConfig = {
@@ -382,24 +394,24 @@ const DEFAULT_CONFIG: AppConfig = {
     globalAccessKey: "",
     compress: {
       threshold: 10,
-      target: 5
-    }
+      target: 5,
+    },
   },
   apiKeys: {
     doubao: {
       accessKey: "",
-      secretKey: ""
+      secretKey: "",
     },
     gitee: "",
     modelscope: "",
     huggingface: "",
-    pollinations: ""
+    pollinations: "",
   },
   defaults: {
     imageModel: "doubao-seedream-4-5-251128",
     imageSize: "2048x2048",
     imageQuality: "standard",
-    imageCount: 1
+    imageCount: 1,
   },
   providers: {
     doubao: {
@@ -411,8 +423,8 @@ const DEFAULT_CONFIG: AppConfig = {
       defaultEditSize: "2048x2048",
       textModels: [
         "doubao-seedream-4-5-251128",
-        "doubao-seedream-4-0-250828"
-      ]
+        "doubao-seedream-4-0-250828",
+      ],
     },
     gitee: {
       enabled: true,
@@ -442,14 +454,14 @@ const DEFAULT_CONFIG: AppConfig = {
         "HunyuanDiT-v1.2-Diffusers-Distilled",
         "CogView4_6B",
         "stable-diffusion-3-medium",
-        "FLUX_1-Krea-dev"
+        "FLUX_1-Krea-dev",
       ],
       asyncTextModels: [
         "FLUX.1-dev",
         "LongCat-Image",
         "flux-1-schnell",
         "Qwen-Image-2512",
-        "Qwen-Image"
+        "Qwen-Image",
       ],
       editModels: [
         "Qwen-Image-Edit",
@@ -463,13 +475,13 @@ const DEFAULT_CONFIG: AppConfig = {
         "InstantCharacter",
         "DreamO",
         "LongCat-Image-Edit",
-        "AnimeSharp"
+        "AnimeSharp",
       ],
       asyncEditModels: [
         "Qwen-Image-Edit-2511",
         "LongCat-Image-Edit",
-        "FLUX.1-Kontext-dev"
-      ]
+        "FLUX.1-Kontext-dev",
+      ],
     },
     modelscope: {
       enabled: true,
@@ -479,13 +491,18 @@ const DEFAULT_CONFIG: AppConfig = {
       defaultSize: "1024x1024",
       defaultEditSize: "1024x1024",
       textModels: [
-        "Tongyi-MAI/Z-Image-Turbo"
+        "Tongyi-MAI/Z-Image-Turbo",
       ],
       editModels: [
         "Qwen/Qwen-Image-Edit-2511",
         "Qwen/Qwen-Image-Edit-2509",
-        "Qwen/Qwen-Image-Edit"
-      ]
+        "Qwen/Qwen-Image-Edit",
+      ],
+      blendModels: [
+        "Qwen/Qwen-Image-Edit-2511",
+        "Qwen/Qwen-Image-Edit-2509",
+        "Qwen/Qwen-Image-Edit",
+      ],
     },
     huggingface: {
       enabled: true,
@@ -494,21 +511,21 @@ const DEFAULT_CONFIG: AppConfig = {
         "https://luca115-z-image-turbo.hf.space",
         "https://linoyts-z-image-portrait.hf.space",
         "https://prokofyev8-z-image-portrait.hf.space",
-        "https://yingzhac-z-image-nsfw.hf.space"
+        "https://yingzhac-z-image-nsfw.hf.space",
       ],
       editApiUrls: [
-        "https://lenml-qwen-image-edit-2511-fast.hf.space"
+        "https://lenml-qwen-image-edit-2511-fast.hf.space",
       ],
       defaultModel: "z-image-turbo",
       defaultEditModel: "Qwen-Image-Edit-2511",
       defaultSize: "1024x1024",
       defaultEditSize: "1024x1024",
       textModels: [
-        "z-image-turbo"
+        "z-image-turbo",
       ],
       editModels: [
-        "Qwen-Image-Edit-2511"
-      ]
+        "Qwen-Image-Edit-2511",
+      ],
     },
     pollinations: {
       enabled: true,
@@ -519,13 +536,27 @@ const DEFAULT_CONFIG: AppConfig = {
       defaultSize: "1024x1024",
       defaultEditSize: "1024x1024",
       textModels: [
-        "flux", "turbo", "zimage", "kontext", "nanobanana", "nanobanana-pro",
-        "seedream", "seedream-pro", "gptimage", "gptimage-large", "veo",
-        "seedance", "seedance-pro"
+        "flux",
+        "turbo",
+        "zimage",
+        "kontext",
+        "nanobanana",
+        "nanobanana-pro",
+        "seedream",
+        "seedream-pro",
+        "gptimage",
+        "gptimage-large",
+        "veo",
+        "seedance",
+        "seedance-pro",
       ],
       editModels: [
-        "nanobanana-pro", "gptimage", "gptimage-large", "nanobanana",
-        "seedream", "seedream-pro"
+        "nanobanana-pro",
+        "gptimage",
+        "gptimage-large",
+        "nanobanana",
+        "seedream",
+        "seedream-pro",
       ],
       seed: -1,
       quality: "hd",
@@ -535,29 +566,29 @@ const DEFAULT_CONFIG: AppConfig = {
       private: true,
       nologo: true,
       nofeed: false,
-      safe: false
-    }
+      safe: false,
+    },
   },
   imageBed: {
     baseUrl: "https://imgbed.lianwusuoai.top",
     uploadEndpoint: "/upload",
     authCode: "imgbed_xKAGfobLGhsEBEMlt5z0yvYdtw8zNTM6",
     uploadFolder: "img-router",
-    uploadChannel: "s3"
+    uploadChannel: "s3",
   },
   logging: {
     level: "info",
     verbose: true,
-    request: true
+    request: true,
   },
   features: {
     cors: true,
-    healthCheck: true
+    healthCheck: true,
   },
   modes: {
     relay: true,
-    backend: false
-  }
+    backend: false,
+  },
 };
 
 export const DOUBAO_MODELS = DEFAULT_CONFIG.providers.doubao.textModels;
@@ -570,7 +601,7 @@ export const ALL_TEXT_MODELS = [
   ...GITEE_MODELS,
   ...MODELSCOPE_MODELS,
   ...HUGGINGFACE_MODELS,
-  ...POLLINATIONS_MODELS
+  ...POLLINATIONS_MODELS,
 ];
 
 /**
@@ -586,7 +617,7 @@ class ConfigManager {
   constructor() {
     this.runtimeConfigPath = path.resolve(process.cwd(), "data", "runtime-config.json");
     this.legacyRuntimeConfigPath = path.resolve(process.cwd(), "runtime-config.json");
-    
+
     // 初始化为默认配置
     this.config = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
     this.runtimeConfig = this.loadRuntimeConfig();
@@ -596,12 +627,14 @@ class ConfigManager {
       this.runtimeConfig = sanitized;
       this.saveRuntimeConfig();
     }
-    
+
     // 将运行时配置合并到应用配置中
     this.applyRuntimeOverrides();
   }
 
-  private sanitizeRuntimeConfig(config: RuntimeConfig): { config: RuntimeConfig; changed: boolean } {
+  private sanitizeRuntimeConfig(
+    config: RuntimeConfig,
+  ): { config: RuntimeConfig; changed: boolean } {
     let changed = false;
     const providers: Record<string, RuntimeProviderConfig> = {};
 
@@ -627,7 +660,9 @@ class ConfigManager {
 
         if (typeof v.model === "string" || v.model === null) out.model = v.model as string | null;
         if (typeof v.size === "string" || v.size === null) out.size = v.size as string | null;
-        if (typeof v.quality === "string" || v.quality === null) out.quality = v.quality as string | null;
+        if (typeof v.quality === "string" || v.quality === null) {
+          out.quality = v.quality as string | null;
+        }
         if (typeof v.n === "number" || v.n === null) out.n = v.n as number | null;
 
         const allowedKeys = new Set(["model", "size", "quality", "n"]);
@@ -679,13 +714,13 @@ class ConfigManager {
   private loadRuntimeConfig(): RuntimeConfig {
     try {
       if (fs.existsSync(this.runtimeConfigPath)) {
-        const content = fs.readFileSync(this.runtimeConfigPath, 'utf8');
+        const content = fs.readFileSync(this.runtimeConfigPath, "utf8");
         const loaded = JSON.parse(content);
         // 基本的迁移/验证逻辑（如果需要）
         return {
           system: loaded.system || {},
           providers: loaded.providers || {},
-          keyPools: loaded.keyPools || {}
+          keyPools: loaded.keyPools || {},
         };
       }
 
@@ -704,7 +739,7 @@ class ConfigManager {
     return {
       system: {},
       providers: {},
-      keyPools: {}
+      keyPools: {},
     };
   }
 
@@ -731,10 +766,12 @@ class ConfigManager {
         }
       }
     }
-    
+
     // 3. 应用环境变量 (最高优先级)
     if (process.env.PORT) this.config.server.port = parseInt(process.env.PORT);
-    if (process.env.API_TIMEOUT_MS) this.config.server.apiTimeoutMs = parseInt(process.env.API_TIMEOUT_MS);
+    if (process.env.API_TIMEOUT_MS) {
+      this.config.server.apiTimeoutMs = parseInt(process.env.API_TIMEOUT_MS);
+    }
     if (process.env.LOG_LEVEL) this.config.logging.level = process.env.LOG_LEVEL;
   }
 
@@ -757,39 +794,95 @@ class ConfigManager {
   // Getters - 获取具体配置项
   // ==========================================
 
-  get PORT() { return this.config.server.port; }
-  get API_TIMEOUT_MS() { return this.config.server.apiTimeoutMs; }
-  get MAX_REQUEST_BODY_SIZE() { return this.config.server.maxRequestBodySize; }
-  get GLOBAL_ACCESS_KEY() { return this.config.server.globalAccessKey; }
-  get COMPRESS_THRESHOLD() { return this.config.server.compress.threshold; }
-  get COMPRESS_TARGET() { return this.config.server.compress.target; }
-  
-  get LOG_LEVEL() { return this.config.logging.level; }
-  get VERBOSE_LOGGING() { return this.config.logging.verbose; }
-  get ENABLE_CORS() { return this.config.features.cors; }
-  get ENABLE_REQUEST_LOGGING() { return this.config.logging.request; }
-  get ENABLE_HEALTH_CHECK() { return this.config.features.healthCheck; }
+  get PORT() {
+    return this.config.server.port;
+  }
+  get API_TIMEOUT_MS() {
+    return this.config.server.apiTimeoutMs;
+  }
+  get MAX_REQUEST_BODY_SIZE() {
+    return this.config.server.maxRequestBodySize;
+  }
+  get GLOBAL_ACCESS_KEY() {
+    return this.config.server.globalAccessKey;
+  }
+  get COMPRESS_THRESHOLD() {
+    return this.config.server.compress.threshold;
+  }
+  get COMPRESS_TARGET() {
+    return this.config.server.compress.target;
+  }
 
-  get DOUBAO_ACCESS_KEY() { return this.config.apiKeys.doubao.accessKey; }
-  get DOUBAO_SECRET_KEY() { return this.config.apiKeys.doubao.secretKey; }
-  get GITEE_AI_API_KEY() { return this.config.apiKeys.gitee; }
-  get MODELSCOPE_API_KEY() { return this.config.apiKeys.modelscope; }
-  get HUGGINGFACE_API_KEY() { return this.config.apiKeys.huggingface; }
-  get POLLINATIONS_API_KEY() { return this.config.apiKeys.pollinations; }
+  get LOG_LEVEL() {
+    return this.config.logging.level;
+  }
+  get VERBOSE_LOGGING() {
+    return this.config.logging.verbose;
+  }
+  get ENABLE_CORS() {
+    return this.config.features.cors;
+  }
+  get ENABLE_REQUEST_LOGGING() {
+    return this.config.logging.request;
+  }
+  get ENABLE_HEALTH_CHECK() {
+    return this.config.features.healthCheck;
+  }
 
-  get DEFAULT_IMAGE_MODEL() { return this.config.defaults.imageModel; }
-  get DEFAULT_IMAGE_SIZE() { return this.config.defaults.imageSize; }
-  get DEFAULT_IMAGE_QUALITY() { return this.config.defaults.imageQuality; }
-  get DEFAULT_IMAGE_COUNT() { return this.config.defaults.imageCount; }
+  get DOUBAO_ACCESS_KEY() {
+    return this.config.apiKeys.doubao.accessKey;
+  }
+  get DOUBAO_SECRET_KEY() {
+    return this.config.apiKeys.doubao.secretKey;
+  }
+  get GITEE_AI_API_KEY() {
+    return this.config.apiKeys.gitee;
+  }
+  get MODELSCOPE_API_KEY() {
+    return this.config.apiKeys.modelscope;
+  }
+  get HUGGINGFACE_API_KEY() {
+    return this.config.apiKeys.huggingface;
+  }
+  get POLLINATIONS_API_KEY() {
+    return this.config.apiKeys.pollinations;
+  }
 
-  get DoubaoConfig() { return this.config.providers.doubao; }
-  get GiteeConfig() { return this.config.providers.gitee; }
-  get ModelScopeConfig() { return this.config.providers.modelscope; }
-  get HuggingFaceConfig() { return this.config.providers.huggingface; }
-  get PollinationsConfig() { return this.config.providers.pollinations; }
-  
-  get ImageBedConfig() { return this.config.imageBed; }
-  get ModesConfig() { return this.config.modes; }
+  get DEFAULT_IMAGE_MODEL() {
+    return this.config.defaults.imageModel;
+  }
+  get DEFAULT_IMAGE_SIZE() {
+    return this.config.defaults.imageSize;
+  }
+  get DEFAULT_IMAGE_QUALITY() {
+    return this.config.defaults.imageQuality;
+  }
+  get DEFAULT_IMAGE_COUNT() {
+    return this.config.defaults.imageCount;
+  }
+
+  get DoubaoConfig() {
+    return this.config.providers.doubao;
+  }
+  get GiteeConfig() {
+    return this.config.providers.gitee;
+  }
+  get ModelScopeConfig() {
+    return this.config.providers.modelscope;
+  }
+  get HuggingFaceConfig() {
+    return this.config.providers.huggingface;
+  }
+  get PollinationsConfig() {
+    return this.config.providers.pollinations;
+  }
+
+  get ImageBedConfig() {
+    return this.config.imageBed;
+  }
+  get ModesConfig() {
+    return this.config.modes;
+  }
 
   // ==========================================
   // Methods - 配置操作方法
@@ -803,7 +896,7 @@ class ConfigManager {
     return {
       globalAccessKey: this.config.server.globalAccessKey,
       modes: this.config.modes,
-      ...this.runtimeConfig.system
+      ...this.runtimeConfig.system,
     };
   }
 
@@ -841,7 +934,16 @@ class ConfigManager {
    * @returns {ProviderTaskDefaults} 任务默认配置
    */
   public getProviderTaskDefaults(provider: string, task?: string): ProviderTaskDefaults {
-    const config = this.runtimeConfig.providers[provider];
+    // 优先尝试精确匹配，然后尝试小写匹配
+    let config = this.runtimeConfig.providers[provider];
+    if (!config) {
+      // 尝试查找小写键
+      const lowerProvider = provider.toLowerCase();
+      if (this.runtimeConfig.providers[lowerProvider]) {
+        config = this.runtimeConfig.providers[lowerProvider];
+      }
+    }
+
     if (!config) return {};
     if (task === "text" || task === "edit" || task === "blend") {
       return config[task] || {};
@@ -907,7 +1009,9 @@ class ConfigManager {
    */
   public getNextAvailableKey(provider: string): string | null {
     const keys = this.getKeyPool(provider);
-    const activeKeys = keys.filter(k => k.status === 'active' || (k.enabled !== false && k.status !== 'disabled'));
+    const activeKeys = keys.filter((k) =>
+      k.status === "active" || (k.enabled !== false && k.status !== "disabled")
+    );
     if (activeKeys.length === 0) return null;
     return activeKeys[Math.floor(Math.random() * activeKeys.length)].key;
   }
@@ -921,10 +1025,10 @@ class ConfigManager {
    */
   public reportKeyError(provider: string, key: string, _reason?: string) {
     const keys = this.getKeyPool(provider);
-    const item = keys.find(k => k.key === key);
+    const item = keys.find((k) => k.key === key);
     if (item) {
       item.errorCount = (item.errorCount || 0) + 1;
-      if (item.errorCount > 5) item.status = 'disabled';
+      if (item.errorCount > 5) item.status = "disabled";
       this.updateKeyPool(provider, keys);
     }
   }
@@ -937,7 +1041,7 @@ class ConfigManager {
    */
   public reportKeySuccess(provider: string, key: string) {
     const keys = this.getKeyPool(provider);
-    const item = keys.find(k => k.key === key);
+    const item = keys.find((k) => k.key === key);
     if (item) {
       item.errorCount = 0;
       item.lastUsed = Date.now();
@@ -1015,17 +1119,29 @@ export const ModesConfig = configManager.ModesConfig;
 
 export const getSystemConfig = () => configManager.getSystemConfig();
 export const getRuntimeConfig = () => configManager.getRuntimeConfig();
-export const updateSystemConfig = (patch: Partial<SystemConfig>) => configManager.updateSystemConfig(patch);
-export const replaceRuntimeConfig = (newConfig: RuntimeConfig) => configManager.replaceRuntimeConfig(newConfig);
+export const updateSystemConfig = (patch: Partial<SystemConfig>) =>
+  configManager.updateSystemConfig(patch);
+export const replaceRuntimeConfig = (newConfig: RuntimeConfig) =>
+  configManager.replaceRuntimeConfig(newConfig);
 
-export const getProviderTaskDefaults = (provider: string, task?: string) => configManager.getProviderTaskDefaults(provider, task);
-export const setProviderTaskDefaults = (provider: string, task: string, defaults: ProviderTaskDefaults) => configManager.setProviderTaskDefaults(provider, task, defaults);
-export const setProviderEnabled = (provider: string, enabled: boolean) => configManager.setProviderEnabled(provider, enabled);
+export const getProviderTaskDefaults = (provider: string, task?: string) =>
+  configManager.getProviderTaskDefaults(provider, task);
+export const setProviderTaskDefaults = (
+  provider: string,
+  task: string,
+  defaults: ProviderTaskDefaults,
+) => configManager.setProviderTaskDefaults(provider, task, defaults);
+export const setProviderEnabled = (provider: string, enabled: boolean) =>
+  configManager.setProviderEnabled(provider, enabled);
 
 export const getKeyPool = (provider: string) => configManager.getKeyPool(provider);
-export const updateKeyPool = (provider: string, keys: KeyPoolItem[]) => configManager.updateKeyPool(provider, keys);
-export const getNextAvailableKey = (provider: string) => configManager.getNextAvailableKey(provider);
-export const reportKeyError = (provider: string, key: string, reason?: string) => configManager.reportKeyError(provider, key, reason);
-export const reportKeySuccess = (provider: string, key: string) => configManager.reportKeySuccess(provider, key);
+export const updateKeyPool = (provider: string, keys: KeyPoolItem[]) =>
+  configManager.updateKeyPool(provider, keys);
+export const getNextAvailableKey = (provider: string) =>
+  configManager.getNextAvailableKey(provider);
+export const reportKeyError = (provider: string, key: string, reason?: string) =>
+  configManager.reportKeyError(provider, key, reason);
+export const reportKeySuccess = (provider: string, key: string) =>
+  configManager.reportKeySuccess(provider, key);
 
 export const IMAGE_BED_CONFIG = configManager.ImageBedConfig;

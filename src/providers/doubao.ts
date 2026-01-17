@@ -15,7 +15,11 @@ import {
   type ProviderCapabilities,
   type ProviderConfig,
 } from "./base.ts";
-import type { GenerationResult, ImageGenerationRequest, ImagesBlendRequest } from "../types/index.ts";
+import type {
+  GenerationResult,
+  ImageGenerationRequest,
+  ImagesBlendRequest,
+} from "../types/index.ts";
 import { DoubaoConfig } from "../config/manager.ts";
 import { fetchWithTimeout, urlToBase64 } from "../utils/index.ts";
 import { parseErrorMessage } from "../core/error-handler.ts";
@@ -33,7 +37,7 @@ import { withApiTiming } from "../middleware/timing.ts";
 
 /**
  * Doubao Provider 实现类
- * 
+ *
  * 封装了与火山引擎视觉大模型 API 的交互逻辑。
  */
 export class DoubaoProvider extends BaseProvider {
@@ -45,12 +49,12 @@ export class DoubaoProvider extends BaseProvider {
    * 定义了该 Provider 支持的功能特性和限制。
    */
   readonly capabilities: ProviderCapabilities = {
-    textToImage: true,      // 支持文生图
-    imageToImage: true,     // 支持图生图
+    textToImage: true, // 支持文生图
+    imageToImage: true, // 支持图生图
     multiImageFusion: true, // 支持多图融合
-    asyncTask: false,       // 仅支持同步任务
-    maxInputImages: 14,     // 最多支持 14 张参考图
-    maxOutputImages: 15,    // 文生图上限 15 张
+    asyncTask: false, // 仅支持同步任务
+    maxInputImages: 14, // 最多支持 14 张参考图
+    maxOutputImages: 15, // 文生图上限 15 张
     maxEditOutputImages: 14, // 图生图上限 14 张
     maxBlendOutputImages: 13, // 融合生图上限 13 张
     outputFormats: ["url", "b64_json"], // 支持 URL 和 Base64 输出
@@ -95,8 +99,10 @@ export class DoubaoProvider extends BaseProvider {
 
     // 总和校验逻辑：输入图片数量 + 期望生成张数 (n) <= 15
     const requestCount = typeof request.n === "number" ? request.n : Number(request.n || 1);
-    const finalCount = Number.isFinite(requestCount) && requestCount > 0 ? Math.floor(requestCount) : 1;
-    
+    const finalCount = Number.isFinite(requestCount) && requestCount > 0
+      ? Math.floor(requestCount)
+      : 1;
+
     if (request.images.length + finalCount > 15) {
       return "总计上限 (输入+输出)超过15张图，生图失败";
     }
@@ -106,7 +112,7 @@ export class DoubaoProvider extends BaseProvider {
 
   /**
    * 智能修正图片尺寸 (Auto-Upscale)
-   * 
+   *
    * 针对豆包不同模型对分辨率的不同要求，自动将不合规的尺寸“升级”到最近的合法尺寸。
    * 这解决了 WebUI 中用户选择了不兼容的尺寸导致请求失败的问题。
    */
@@ -131,16 +137,19 @@ export class DoubaoProvider extends BaseProvider {
       // 这里简单向上取整
       width = Math.ceil(width * ratio);
       height = Math.ceil(height * ratio);
-      
+
       // 确保宽高是偶数 (豆包通常推荐)
       if (width % 2 !== 0) width++;
       if (height % 2 !== 0) height++;
 
       const newSize = `${width}x${height}`;
-      info("Doubao", `检测到尺寸 ${size} 低于模型 ${constraints.label} 的最小要求 (${constraints.min} px)，已自动升级为 ${newSize}`);
+      info(
+        "Doubao",
+        `检测到尺寸 ${size} 低于模型 ${constraints.label} 的最小要求 (${constraints.min} px)，已自动升级为 ${newSize}`,
+      );
       return newSize;
     }
-    
+
     // 如果像素过大，理论上也可以降级，但暂不处理，直接返回让上游报错或后续校验拦截
     return size;
   }
@@ -167,12 +176,19 @@ export class DoubaoProvider extends BaseProvider {
 
     const ratio = width / height;
     const totalPixels = width * height;
-    
+
     // Log detailed size validation info
-    info("Doubao", `校验尺寸: ${size} (Width: ${width}, Height: ${height}, Ratio: ${ratio.toFixed(4)}, Pixels: ${totalPixels})`);
+    info(
+      "Doubao",
+      `校验尺寸: ${size} (Width: ${width}, Height: ${height}, Ratio: ${
+        ratio.toFixed(4)
+      }, Pixels: ${totalPixels})`,
+    );
 
     if (ratio < 1 / 16 || ratio > 16) {
-      const msg = `Doubao 模型 size=${size} 不符合要求：宽高比 ${width}:${height} (${ratio.toFixed(4)}) 超出 [1/16, 16]`;
+      const msg = `Doubao 模型 size=${size} 不符合要求：宽高比 ${width}:${height} (${
+        ratio.toFixed(4)
+      }) 超出 [1/16, 16]`;
       warn("Doubao", msg);
       return msg;
     }
@@ -181,7 +197,8 @@ export class DoubaoProvider extends BaseProvider {
     if (!constraints) return null;
 
     if (totalPixels < constraints.min || totalPixels > constraints.max) {
-      const msg = `Doubao ${constraints.label} 模型 size=${size} 不符合要求：总像素 ${totalPixels} 超出 [${constraints.min}, ${constraints.max}]`;
+      const msg =
+        `Doubao ${constraints.label} 模型 size=${size} 不符合要求：总像素 ${totalPixels} 超出 [${constraints.min}, ${constraints.max}]`;
       warn("Doubao", msg);
       return msg;
     }
@@ -203,7 +220,7 @@ export class DoubaoProvider extends BaseProvider {
 
   /**
    * 执行图片生成请求
-   * 
+   *
    * 处理流程：
    * 1. 解析请求参数（模型、尺寸、Prompt）。
    * 2. 如果是多图融合任务，执行 Prompt 智能重写（将"这张图"替换为明确的"图1"、"图2"）。
@@ -257,7 +274,7 @@ export class DoubaoProvider extends BaseProvider {
         if (originalPrompt === finalPrompt && !finalPrompt.includes("图1")) {
           finalPrompt = `图1是背景，图2是主体。任务：${finalPrompt}`;
         }
-        
+
         if (finalPrompt !== originalPrompt) {
           info("Doubao", `Prompt 已智能转换: "${originalPrompt}" -> "${finalPrompt}"`);
         }
@@ -266,7 +283,7 @@ export class DoubaoProvider extends BaseProvider {
       // 智能 Prompt 数量提取
       // 解决 WebUI 可能始终发送 n=1 的问题
       // 如果 Prompt 中明确要求了数量，优先使用 Prompt 中的意图
-      /* 
+      /*
        * [用户指令] 意图识别不重要，移除该逻辑，仅依赖配置和请求参数
       let inferredCount: number | undefined;
       if (request.prompt) {
@@ -285,7 +302,7 @@ export class DoubaoProvider extends BaseProvider {
         }
       }
       */
-      
+
       const rawCount = request.n;
       info("Doubao", `收到请求参数 n=${rawCount}`);
 
@@ -315,7 +332,7 @@ export class DoubaoProvider extends BaseProvider {
       logFullPrompt("Doubao", options.requestId, finalPrompt);
       if (hasImages) logInputImages("Doubao", options.requestId, processedImages);
       logImageGenerationStart("Doubao", options.requestId, model, size, finalPrompt.length);
-      
+
       // 额外参数处理 (Guidance Scale, Prompt Optimization 等)
       const extraOptions: Record<string, unknown> = {};
       if (request["optimize_prompt_options"]) {
@@ -427,7 +444,7 @@ export class DoubaoProvider extends BaseProvider {
   /**
    * 融合生图实现
    * 将 Blend 请求转换为标准生成请求并执行
-   * 
+   *
    * @param apiKey - API 密钥
    * @param request - 融合请求参数
    * @param options - 生成选项
@@ -449,14 +466,14 @@ export class DoubaoProvider extends BaseProvider {
           // 注意：通常我们只取最后一条用户的文本作为 Prompt，或者拼接所有
           // 这里简单拼接，但避免重复
           if (!prompt.includes(msg.content)) {
-             prompt += (prompt ? " " : "") + msg.content;
+            prompt += (prompt ? " " : "") + msg.content;
           }
         } else if (Array.isArray(msg.content)) {
           for (const item of msg.content) {
             if (item.type === "text") {
-               if (!prompt.includes(item.text)) {
-                 prompt += (prompt ? " " : "") + item.text;
-               }
+              if (!prompt.includes(item.text)) {
+                prompt += (prompt ? " " : "") + item.text;
+              }
             } else if (item.type === "image_url" && item.image_url?.url) {
               images.push(item.image_url.url);
             } else if (item.type === "image") {
@@ -472,23 +489,23 @@ export class DoubaoProvider extends BaseProvider {
         }
       }
     }
-    
+
     prompt = prompt.trim();
     if (!prompt) {
-        prompt = "Image fusion based on input images"; // 默认 Prompt
+      prompt = "Image fusion based on input images"; // 默认 Prompt
     }
 
     // 2. 构建 ImageGenerationRequest
     // 过滤掉 ImagesBlendRequest 特有但 ImageGenerationRequest 不需要或需转换的字段
     const {
-        messages: _ignoredMessages,
-        prompt: _ignoredPrompt,
-        model,
-        n,
-        size,
-        response_format,
-        stream,
-        ...extraParams
+      messages: _ignoredMessages,
+      prompt: _ignoredPrompt,
+      model,
+      n,
+      size,
+      response_format,
+      stream,
+      ...extraParams
     } = request;
 
     const generationRequest: ImageGenerationRequest = {

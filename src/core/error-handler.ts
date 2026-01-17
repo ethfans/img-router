@@ -108,7 +108,7 @@ const FRIENDLY_MESSAGES: Record<ErrorType, string> = {
 
 /**
  * 检测错误文本中是否包含特定关键词
- * 
+ *
  * @param {string} text - 待检测的错误文本
  * @param {string[]} keywords - 关键词列表
  * @returns {boolean} 如果包含任意一个关键词则返回 true
@@ -121,14 +121,14 @@ function containsKeywords(text: string, keywords: string[]): boolean {
 /**
  * 识别错误类型
  * 根据错误文本内容和 HTTP 状态码判断具体的错误类型
- * 
+ *
  * @param {string} errorText - 错误描述文本
  * @param {number} [statusCode] - HTTP 状态码（可选）
  * @returns {ErrorType} 匹配到的错误类型
  */
 function identifyErrorType(errorText: string, statusCode?: number): ErrorType {
   // 1. 优先检查特定错误关键词
-  
+
   // 检查 API Key 不可用错误（优先级最高）
   if (containsKeywords(errorText, ERROR_PATTERNS.noAvailableKey)) {
     return ErrorType.NO_AVAILABLE_KEY;
@@ -270,7 +270,7 @@ export function parseErrorMessage(
 
 /**
  * 创建特定提供商的错误处理函数
- * 
+ *
  * @param {string} provider - 提供商名称
  * @returns {Function} 错误处理闭包，接受状态码和错误文本
  */

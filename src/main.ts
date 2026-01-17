@@ -1,6 +1,6 @@
 /**
  * 应用程序主入口文件
- * 
+ *
  * 负责整个应用的初始化、启动和生命周期管理。
  * 主要职责：
  * 1. 环境初始化：加载配置、初始化日志系统。
@@ -10,13 +10,13 @@
  */
 
 import { handleRequest } from "./app.ts";
-import { 
-  PORT, 
-  getSystemConfig, 
-  getRuntimeConfig, 
+import {
+  getRuntimeConfig,
+  getSystemConfig,
   LOG_LEVEL,
-  type SystemConfig, 
-  type RuntimeConfig 
+  PORT,
+  type RuntimeConfig,
+  type SystemConfig,
 } from "./config/manager.ts";
 import { closeLogger, configureLogger, info, initLogger, LogLevel } from "./core/logger.ts";
 import { providerRegistry } from "./providers/registry.ts";
@@ -24,10 +24,10 @@ import type { ProviderName } from "./providers/base.ts";
 
 /**
  * 获取应用版本号
- * 
+ *
  * 从 deno.json 文件中读取版本信息。
  * 如果读取失败，返回 "unknown"。
- * 
+ *
  * @returns Promise<string> 版本号字符串
  */
 async function getVersion(): Promise<string> {
@@ -92,7 +92,7 @@ info("Startup", `📁 日志目录: ./data/logs`);
 
 /**
  * 处理 SIGINT 信号 (通常由 Ctrl+C 触发)
- * 
+ *
  * 记录日志并关闭日志文件句柄，然后退出进程。
  */
 Deno.addSignalListener("SIGINT", async () => {

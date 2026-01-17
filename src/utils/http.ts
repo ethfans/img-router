@@ -1,6 +1,6 @@
 /**
  * @fileoverview HTTP 网络请求工具模块
- * 
+ *
  * 提供增强版的 fetch 函数，集成了以下功能：
  * 1. 超时控制 (AbortSignal)
  * 2. SSRF 安全检查 (针对非官方域名)
@@ -13,7 +13,7 @@ import { isSafeUrl } from "./security.ts";
 
 /**
  * 带超时控制和安全检查的 fetch 函数
- * 
+ *
  * @param {string} url - 请求的目标 URL
  * @param {RequestInit} options - 标准 fetch 选项
  * @param {number} [timeoutMs=API_TIMEOUT_MS] - 超时时间（毫秒），默认为全局配置值
@@ -57,7 +57,7 @@ export async function fetchWithTimeout(
 
 /**
  * 发送 JSON 格式的 POST 请求
- * 
+ *
  * @param {string} url - 请求 URL
  * @param {unknown} body - 请求体数据（将自动序列化为 JSON）
  * @param {Record<string, string>} [headers={}] - 额外的请求头
@@ -82,7 +82,7 @@ export function postJson(
 
 /**
  * 发送 GET 请求
- * 
+ *
  * @param {string} url - 请求 URL
  * @param {Record<string, string>} [headers={}] - 额外的请求头
  * @param {number} [timeoutMs] - 自定义超时时间
@@ -102,7 +102,7 @@ export function get(
 /**
  * 发送 FormData 格式的 POST 请求
  * 通常用于文件上传
- * 
+ *
  * @param {string} url - 请求 URL
  * @param {FormData} formData - FormData 对象
  * @param {Record<string, string>} [headers={}] - 额外的请求头（注意：不要手动设置 Content-Type，浏览器/运行时会自动设置 boundary）

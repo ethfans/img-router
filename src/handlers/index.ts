@@ -1,6 +1,6 @@
 /**
  * HTTP 处理器统一导出模块
- * 
+ *
  * 汇集并导出所有路由处理函数，供 app.ts 使用。
  * 包含：
  * - Chat Completions 处理 (chat.ts)

@@ -1,6 +1,6 @@
 /**
  * @fileoverview 计时中间件
- * 
+ *
  * 提供精细的 API 调用耗时统计功能。
  * 使用栈式结构支持嵌套计时，能够生成详细的性能分析报告。
  */
@@ -31,7 +31,7 @@ export interface Timer {
 
 /**
  * 计时上下文类
- * 
+ *
  * 管理一次请求生命周期内的所有计时器。
  * 使用栈结构 (Stack) 来自动处理嵌套调用的层级关系。
  */
@@ -58,7 +58,7 @@ export class TimingContext {
   /**
    * 开始一个新的计时阶段
    * 新的计时器会自动作为当前活跃计时器的子节点
-   * 
+   *
    * @param name - 操作名称
    * @returns 计时器 ID (目前仅用于调试或标识)
    */
@@ -85,7 +85,7 @@ export class TimingContext {
 
   /**
    * 结束当前活跃的计时阶段 (栈顶元素)
-   * 
+   *
    * @returns 持续时间 (毫秒)
    */
   end(): number {
@@ -109,7 +109,7 @@ export class TimingContext {
   /**
    * 结束指定名称的计时器
    * 会自动结束该计时器之上的所有未结束计时器 (栈回溯)
-   * 
+   *
    * @param name - 要结束的计时器名称
    * @returns 持续时间 (毫秒)，未找到返回 -1
    */
@@ -135,7 +135,7 @@ export class TimingContext {
   /**
    * 完成整个上下文的计时
    * 强制结束所有未闭合的计时器，并计算总耗时
-   * 
+   *
    * @returns 总持续时间 (毫秒)
    */
   finish(): number {
@@ -162,7 +162,7 @@ export class TimingContext {
   /**
    * 获取当前总耗时
    * 如果已结束返回最终耗时，否则返回当前流逝时间
-   * 
+   *
    * @returns 持续时间 (毫秒)
    */
   getDuration(): number {
@@ -174,7 +174,7 @@ export class TimingContext {
 
   /**
    * 生成层级化的计时报告
-   * 
+   *
    * @returns 包含各阶段耗时的报告对象
    */
   getReport(): {
@@ -204,14 +204,14 @@ export class TimingContext {
 
 /**
  * API 调用自动计时包装器
- * 
+ *
  * 用于包装对外部 API 的调用，自动记录开始和结束日志以及耗时。
- * 
+ *
  * @param {string} provider - 服务提供商名称
  * @param {string} apiType - API 操作类型 (如 "generate_image")
  * @param {Function} fn - 要执行的异步函数
  * @returns {Promise<T>} 函数执行结果
- * 
+ *
  * @example
  * ```typescript
  * const result = await withApiTiming("Doubao", "generate", async () => {
@@ -242,7 +242,7 @@ export async function withApiTiming<T>(
 /**
  * 简单的异步函数计时工具
  * 仅记录 DEBUG 级别的开始和结束日志
- * 
+ *
  * @param {string} name - 操作名称
  * @param {Function} fn - 要执行的异步函数
  * @returns {Promise<T>} 函数执行结果
@@ -265,7 +265,7 @@ export async function timed<T>(name: string, fn: () => Promise<T>): Promise<T> {
 
 /**
  * 创建计时上下文的工厂函数
- * 
+ *
  * @param {string} [name] - 根计时器名称
  * @returns {TimingContext} 新的计时上下文实例
  */

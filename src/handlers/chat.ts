@@ -4,7 +4,7 @@
  * 处理 /v1/chat/completions 端点。
  * 该端点主要用于接收包含图片生成指令的聊天请求，并将其转换为标准的图片生成请求。
  * 支持 OpenAI 格式的流式 (Stream) 和非流式响应。
- * 
+ *
  * 核心逻辑：
  * 1. 鉴权与路由：根据 API Key 或后端模式配置，确定使用的 Provider。
  * 2. 消息标准化：处理非标准格式的图片输入（如 Cherry Studio 格式）。
@@ -23,21 +23,14 @@ import type {
   TextContentItem,
 } from "../types/index.ts";
 import { providerRegistry } from "../providers/registry.ts";
-import { getSystemConfig, getNextAvailableKey } from "../config/manager.ts";
+import { getNextAvailableKey, getSystemConfig } from "../config/manager.ts";
 import type { IProvider } from "../providers/base.ts";
 import { buildDataUri, normalizeAndCompressInputImages } from "../utils/image.ts";
-import {
-  debug,
-  error,
-  generateRequestId,
-  info,
-  logRequestEnd,
-  warn,
-} from "../core/logger.ts";
+import { debug, error, generateRequestId, info, logRequestEnd, warn } from "../core/logger.ts";
 
 /**
  * 标准化消息内容格式
- * 
+ *
  * 将所有非标准图片格式转换为标准 OpenAI 格式。
  * 兼容性处理：
  * - Cherry Studio 格式：{type:"image", image:"base64", mediaType:"image/png"}
@@ -81,7 +74,7 @@ export function normalizeMessageContent(
 
 /**
  * 从消息数组中提取 Prompt 和图片
- * 
+ *
  * 策略：
  * 1. 只关注最后一条用户消息（忽略历史上下文，因为目前是单轮生成）。
  * 2. 提取文本作为 Prompt。
@@ -134,7 +127,7 @@ export function extractPromptAndImages(messages: Message[]): { prompt: string; i
 
 /**
  * 处理 /v1/chat/completions 端点
- * 
+ *
  * 核心流程：
  * 1. **鉴权与路由**：
  *    - **中转模式 (Relay Mode)**：客户端提供 Provider 的 API Key，直接透传。
@@ -157,11 +150,11 @@ export async function handleChatCompletions(req: Request): Promise<Response> {
     warn("HTTP", "系统服务未启动：中转模式和后端模式均已关闭");
     // logRequestEnd 由 middleware 统一记录
     return new Response(
-      JSON.stringify({ error: "服务未启动：请开启中转模式或后端模式" }), 
-      { 
+      JSON.stringify({ error: "服务未启动：请开启中转模式或后端模式" }),
+      {
         status: 503,
-        headers: { "Content-Type": "application/json; charset=utf-8" }
-      }
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+      },
     );
   }
 
@@ -170,7 +163,7 @@ export async function handleChatCompletions(req: Request): Promise<Response> {
   // 1. 获取 Authorization Header
   const authHeader = req.headers.get("Authorization");
   let apiKey = authHeader?.replace("Bearer ", "").trim() || "";
-  
+
   // 2. 尝试检测 Provider (基于 Key 格式)
   let provider: IProvider | undefined = providerRegistry.detectProvider(apiKey);
   let usingBackendMode = false;
@@ -179,40 +172,40 @@ export async function handleChatCompletions(req: Request): Promise<Response> {
   if (provider) {
     // Case A: 识别到 Provider Key
     if (!modes.relay) {
-       warn("HTTP", "中转模式已禁用，拒绝外部 Provider Key");
-       // logRequestEnd 由 middleware 统一记录
-       return new Response(JSON.stringify({ error: "Relay mode is disabled" }), { 
-         status: 403,
-         headers: { "Content-Type": "application/json" }
-       });
+      warn("HTTP", "中转模式已禁用，拒绝外部 Provider Key");
+      // logRequestEnd 由 middleware 统一记录
+      return new Response(JSON.stringify({ error: "Relay mode is disabled" }), {
+        status: 403,
+        headers: { "Content-Type": "application/json" },
+      });
     }
     // 继续使用该 Provider 和 Key
   } else {
     // Case B: 未识别到 Key (可能是空，可能是系统 Key，可能是无效 Key)
     // 尝试后端模式
     if (modes.backend) {
-       // 验证是否允许访问后端模式
-       // 如果设置了 Global Key，必须匹配
-       if (systemConfig.globalAccessKey && apiKey !== systemConfig.globalAccessKey) {
-          // 如果 Key 不匹配系统 Key，且也不是 Provider Key (上面已检测)，则拒绝
-          warn("HTTP", "鉴权失败: 非有效 Provider Key 且不匹配 Global Key");
-          // logRequestEnd 由 middleware 统一记录
-          return new Response(JSON.stringify({ error: "Unauthorized" }), { 
-            status: 401,
-            headers: { "Content-Type": "application/json" }
-          });
-       }
-       
-       usingBackendMode = true;
-       // 后续需要从 Body 解析 Model 来确定 Provider
+      // 验证是否允许访问后端模式
+      // 如果设置了 Global Key，必须匹配
+      if (systemConfig.globalAccessKey && apiKey !== systemConfig.globalAccessKey) {
+        // 如果 Key 不匹配系统 Key，且也不是 Provider Key (上面已检测)，则拒绝
+        warn("HTTP", "鉴权失败: 非有效 Provider Key 且不匹配 Global Key");
+        // logRequestEnd 由 middleware 统一记录
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      usingBackendMode = true;
+      // 后续需要从 Body 解析 Model 来确定 Provider
     } else {
-       // 后端模式关闭，且 Key 无效
-       warn("HTTP", "无法识别 Key 且后端模式未开启");
-       // logRequestEnd 由 middleware 统一记录
-       return new Response(JSON.stringify({ error: "Invalid API Key" }), { 
-         status: 401,
-         headers: { "Content-Type": "application/json" }
-       });
+      // 后端模式关闭，且 Key 无效
+      warn("HTTP", "无法识别 Key 且后端模式未开启");
+      // logRequestEnd 由 middleware 统一记录
+      return new Response(JSON.stringify({ error: "Invalid API Key" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
     }
   }
 
@@ -233,42 +226,48 @@ export async function handleChatCompletions(req: Request): Promise<Response> {
 
     // 如果是后端模式，现在需要确定 Provider 和 Key
     if (usingBackendMode) {
-        if (!requestBody.model) {
-            warn("HTTP", "后端模式下请求缺失 model 参数");
-            logRequestEnd(requestId, req.method, url.pathname, 400, 0, "missing model");
-            return new Response(JSON.stringify({ error: "Missing 'model' parameter in backend mode" }), {
-                status: 400,
-                headers: { "Content-Type": "application/json" }
-            });
-        }
-        provider = providerRegistry.getProviderByModel(requestBody.model);
-        if (!provider) {
-            warn("HTTP", `后端模式下请求了不支持的模型: ${requestBody.model}`);
-            logRequestEnd(requestId, req.method, url.pathname, 400, 0, "unsupported model");
-            return new Response(JSON.stringify({ error: `Unsupported model: ${requestBody.model}` }), {
-                status: 400,
-                headers: { "Content-Type": "application/json" }
-            });
-        }
-        
-        info("HTTP", `路由到 ${provider.name} (Backend Mode)`);
+      if (!requestBody.model) {
+        warn("HTTP", "后端模式下请求缺失 model 参数");
+        logRequestEnd(requestId, req.method, url.pathname, 400, 0, "missing model");
+        return new Response(
+          JSON.stringify({ error: "Missing 'model' parameter in backend mode" }),
+          {
+            status: 400,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      }
+      provider = providerRegistry.getProviderByModel(requestBody.model);
+      if (!provider) {
+        warn("HTTP", `后端模式下请求了不支持的模型: ${requestBody.model}`);
+        logRequestEnd(requestId, req.method, url.pathname, 400, 0, "unsupported model");
+        return new Response(JSON.stringify({ error: `Unsupported model: ${requestBody.model}` }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
 
-        // 从池中获取 Key
-        const poolKey = await getNextAvailableKey(provider.name);
-        if (!poolKey) {
-            warn("HTTP", `Provider ${provider.name} 账号池耗尽`);
-            logRequestEnd(requestId, req.method, url.pathname, 503, 0, "key pool exhausted");
-            return new Response(JSON.stringify({ error: `No available API keys for provider: ${provider.name}` }), {
-                status: 503,
-                headers: { "Content-Type": "application/json" }
-            });
-        }
-        apiKey = poolKey; // 注入 Key
-        info("Router", `后端模式: 为 ${provider.name} 分配了 Key (ID: ...${apiKey.slice(-4)})`);
+      info("HTTP", `路由到 ${provider.name} (Backend Mode)`);
+
+      // 从池中获取 Key
+      const poolKey = await getNextAvailableKey(provider.name);
+      if (!poolKey) {
+        warn("HTTP", `Provider ${provider.name} 账号池耗尽`);
+        logRequestEnd(requestId, req.method, url.pathname, 503, 0, "key pool exhausted");
+        return new Response(
+          JSON.stringify({ error: `No available API keys for provider: ${provider.name}` }),
+          {
+            status: 503,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      }
+      apiKey = poolKey; // 注入 Key
+      info("Router", `后端模式: 为 ${provider.name} 分配了 Key (ID: ...${apiKey.slice(-4)})`);
     }
 
     if (!provider) {
-        throw new Error("内部错误: Provider 未定义");
+      throw new Error("内部错误: Provider 未定义");
     }
 
     const isStream = requestBody.stream === true;

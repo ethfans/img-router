@@ -1,8 +1,8 @@
 /**
  * @fileoverview Provider 类型定义
- * 
+ *
  * 定义图片生成服务提供商的通用类型和接口。
- * 
+ *
  * 注意：
  * - Provider 的具体行为接口 IProvider 定义在 src/providers/base.ts 中
  * - 各 Provider 的配置常量定义在 src/config/manager.ts 中
@@ -11,18 +11,18 @@
 
 import type { ImageData } from "./request.ts";
 
-/** 
- * 支持的服务提供商类型枚举 
+/**
+ * 支持的服务提供商类型枚举
  */
 export type ProviderType =
-  | "Doubao"      // 字节跳动豆包
-  | "Gitee"       // Gitee AI
-  | "ModelScope"  // 阿里魔搭社区
+  | "Doubao" // 字节跳动豆包
+  | "Gitee" // Gitee AI
+  | "ModelScope" // 阿里魔搭社区
   | "HuggingFace" // Hugging Face Spaces
-  | "Pollinations"// Pollinations AI
-  | "Unknown";    // 未知提供商
+  | "Pollinations" // Pollinations AI
+  | "Unknown"; // 未知提供商
 
-/** 
+/**
  * 图片生成结果接口
  * 标准化各提供商的返回数据结构
  */

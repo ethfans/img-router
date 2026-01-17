@@ -1,6 +1,6 @@
 /**
  * @fileoverview 图片处理工具模块
- * 
+ *
  * 提供一系列图片处理功能，包括：
  * 1. Base64 编解码与格式转换
  * 2. 图片格式自动检测 (基于文件头魔数)
@@ -23,7 +23,7 @@ export interface UrlToBase64Result {
 /**
  * 将网络图片 URL 转换为 Base64 字符串
  * 会自动下载图片并提取其 MIME 类型
- * 
+ *
  * @param {string} url - 图片的 URL 地址
  * @returns {Promise<UrlToBase64Result>} 包含 Base64 数据和 MIME 类型的对象
  * @throws {Error} 如果下载失败
@@ -58,7 +58,7 @@ export async function urlToBase64(url: string): Promise<UrlToBase64Result> {
 
 /**
  * 将 Base64 图片上传到配置的图床服务并返回访问 URL
- * 
+ *
  * @param {string} base64 - Base64 编码的图片数据（可以包含或不包含 Data URI 前缀）
  * @param {string} [mimeType="image/png"] - MIME 类型，用于确定文件扩展名
  * @returns {Promise<string>} 图片的公网访问 URL
@@ -112,9 +112,9 @@ export async function base64ToUrl(base64: string, mimeType: string = "image/png"
   const response = await fetchWithTimeout(uploadUrl.toString(), {
     method: "POST",
     headers: {
-      "Authorization": ImageBedConfig.authCode
+      "Authorization": ImageBedConfig.authCode,
     },
-    body: formData
+    body: formData,
   });
 
   if (!response.ok) {
@@ -188,7 +188,7 @@ export function extractMimeTypeFromDataUri(dataUri: string): string {
 /**
  * 将 Base64 字符串转换为 Blob 对象
  * 适用于通过 FormData 直接上传文件
- * 
+ *
  * @param base64 Base64 字符串（支持 Data URI 格式）
  * @param defaultMime 默认 MIME 类型
  */
@@ -248,33 +248,35 @@ export function formatFileSize(bytes: number): string {
  */
 export function detectImageFormat(data: Uint8Array): string {
   if (data.length < 4) return "unknown";
-  
+
   // PNG: 89 50 4E 47
   if (data[0] === 0x89 && data[1] === 0x50 && data[2] === 0x4E && data[3] === 0x47) {
     return "png";
   }
-  
+
   // JPEG: FF D8 FF
   if (data[0] === 0xFF && data[1] === 0xD8 && data[2] === 0xFF) {
     return "jpeg";
   }
-  
+
   // GIF: 47 49 46 38
   if (data[0] === 0x47 && data[1] === 0x49 && data[2] === 0x46 && data[3] === 0x38) {
     return "gif";
   }
-  
+
   // BMP: 42 4D
   if (data[0] === 0x42 && data[1] === 0x4D) {
     return "bmp";
   }
-  
+
   // WebP: 52 49 46 46 ... 57 45 42 50
-  if (data[0] === 0x52 && data[1] === 0x49 && data[2] === 0x46 && data[3] === 0x46 && 
-      data[8] === 0x57 && data[9] === 0x45 && data[10] === 0x42 && data[11] === 0x50) {
+  if (
+    data[0] === 0x52 && data[1] === 0x49 && data[2] === 0x46 && data[3] === 0x46 &&
+    data[8] === 0x57 && data[9] === 0x45 && data[10] === 0x42 && data[11] === 0x50
+  ) {
     return "webp";
   }
-  
+
   return "unknown";
 }
 
@@ -285,23 +287,29 @@ export function detectImageFormat(data: Uint8Array): string {
 export function getMimeType(format: string): string {
   const ext = format.toLowerCase().split(".").pop();
   switch (ext) {
-    case "png": return "image/png";
+    case "png":
+      return "image/png";
     case "jpg":
-    case "jpeg": return "image/jpeg";
-    case "gif": return "image/gif";
-    case "bmp": return "image/bmp";
-    case "webp": return "image/webp";
-    default: return "application/octet-stream";
+    case "jpeg":
+      return "image/jpeg";
+    case "gif":
+      return "image/gif";
+    case "bmp":
+      return "image/bmp";
+    case "webp":
+      return "image/webp";
+    default:
+      return "application/octet-stream";
   }
 }
 
 /**
  * 规范化并压缩输入图片
- * 
+ *
  * 1. 确保所有图片都是 Data URI 格式
  * 2. 如果是 URL，下载并转换为 Base64
  * 3. 验证图片格式和大小
- * 
+ *
  * @param images 图片数组（URL 或 Base64）
  * @returns Promise<string[]> 规范化后的 Data URI 数组
  */

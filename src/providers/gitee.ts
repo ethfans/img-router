@@ -3,7 +3,7 @@
  *
  * 基于 Gitee AI 平台 API 实现。
  * 支持文生图、图片编辑（同步）、图片编辑（异步）以及融合生图模式。
- * 
+ *
  * 优化重点 (遵循 Gitee_AI_接口逻辑优化指南):
  * 1. 全量 Base64 返回：强制所有接口使用 response_format="b64_json"，严禁返回 URL。
  * 2. 异步/同步自动聚合：根据模型 ID 自动路由到对应接口。
@@ -17,14 +17,14 @@ import {
   type ProviderCapabilities,
   type ProviderConfig,
 } from "./base.ts";
-import type { 
-  GenerationResult, 
-  ImageData, 
-  ImageGenerationRequest, 
-  MessageContentItem,
+import type {
+  GenerationResult,
+  ImageData,
+  ImageGenerationRequest,
+  ImagesBlendRequest,
   Message,
+  MessageContentItem,
   NonStandardImageContentItem,
-  ImagesBlendRequest 
 } from "../types/index.ts";
 import { GiteeConfig } from "../config/manager.ts";
 import { getProviderTaskDefaults } from "../config/manager.ts";
@@ -44,7 +44,7 @@ import { withApiTiming } from "../middleware/timing.ts";
 
 /**
  * Gitee Provider 实现类
- * 
+ *
  * 封装了 Gitee AI 平台的文生图和图生图接口。
  * 根据模型类型自动选择同步或异步处理流程。
  */
@@ -56,14 +56,15 @@ export class GiteeProvider extends BaseProvider {
    * Provider 能力描述
    */
   readonly capabilities: ProviderCapabilities = {
-    textToImage: true,      // 支持文生图
-    imageToImage: true,     // 支持图生图
+    textToImage: true, // 支持文生图
+    imageToImage: true, // 支持图生图
     multiImageFusion: true, // 支持多图融合
-    asyncTask: true,        // 支持异步任务（轮询）
-    maxInputImages: 5,      // 最多支持 5 张输入图片
-    maxOutputImages: 1,     // 文生图上限 (Gitee 官方限制为 1)
-    maxEditOutputImages: 1, // 图生图上限 (Gitee 官方限制为 1)
-    maxBlendOutputImages: 1, // 融合上限 (Gitee 官方限制为 1)
+    asyncTask: true, // 支持异步任务（轮询）
+    maxInputImages: 5, // 最多支持 5 张输入图片
+    maxOutputImages: 16, // 文生图上限 (Gitee 官方限制为 1，支持并发)
+    maxNativeOutputImages: 1, // 原生 API 限制
+    maxEditOutputImages: 16, // 图生图上限
+    maxBlendOutputImages: 16, // 融合上限
     outputFormats: ["b64_json"], // 仅支持 Base64 输出 (优化指南要求)
   };
 
@@ -99,7 +100,7 @@ export class GiteeProvider extends BaseProvider {
 
   /**
    * 执行图片生成请求
-   * 
+   *
    * 核心分发逻辑：
    * 1. 自动识别同步/异步模型。
    * 2. 分发到 handleTextToImage, handleSyncEdit 或 handleAsyncEdit。
@@ -109,73 +110,111 @@ export class GiteeProvider extends BaseProvider {
     request: ImageGenerationRequest,
     options: GenerationOptions,
   ): Promise<GenerationResult> {
-    const startTime = Date.now();
     const hasImages = request.images.length > 0;
 
-    const normalizedRequest: ImageGenerationRequest = { ...request };
+    // 1. 确定最终的生成数量 n
+    // 如果请求中未指定 n，则尝试使用默认配置
+    const n = this.selectCount(request.n, hasImages);
+    const requestWithCount = { ...request, n };
 
-    logFullPrompt("Gitee", options.requestId, normalizedRequest.prompt);
+    // 使用 BaseProvider 的并发生成策略
+    return await this.generateWithConcurrency(
+      apiKey,
+      requestWithCount,
+      options,
+      async (singleRequest) => {
+        const startTime = Date.now();
+        const normalizedRequest: ImageGenerationRequest = { ...singleRequest };
 
-    if (hasImages) {
-      logInputImages("Gitee", options.requestId, normalizedRequest.images);
-    }
+        logFullPrompt("Gitee", options.requestId, normalizedRequest.prompt);
 
-    try {
-      if (hasImages) {
-        const selectedModel = this.selectModel(normalizedRequest.model, true);
-        const isAsyncModel = GiteeConfig.asyncEditModels.includes(selectedModel);
-        const taskDefaults = getProviderTaskDefaults("Gitee", "edit");
-        const size = normalizedRequest.size || taskDefaults.size ||
-          (isAsyncModel ? GiteeConfig.defaultAsyncEditSize : GiteeConfig.defaultEditSize);
-        const n = normalizedRequest.n ?? taskDefaults.n ?? 1;
-
-        const requestWithDefaults: ImageGenerationRequest = {
-          ...normalizedRequest,
-          model: selectedModel,
-          size,
-          n,
-        };
-
-        // 检查是否为异步编辑模型
-        if (isAsyncModel) {
-          return await this.handleAsyncEdit(apiKey, requestWithDefaults, options, size, startTime);
-        } else {
-          return await this.handleSyncEdit(apiKey, requestWithDefaults, options, size, startTime);
-        }
-      } else {
-        const model = this.selectModel(normalizedRequest.model, false);
-        const isAsyncTextModel = GiteeConfig.asyncTextModels.includes(model);
-        const taskDefaults = getProviderTaskDefaults("Gitee", "text");
-        const size = normalizedRequest.size || taskDefaults.size || GiteeConfig.defaultSize;
-        const n = normalizedRequest.n ?? taskDefaults.n ?? 1;
-
-        const requestWithDefaults: ImageGenerationRequest = {
-          ...normalizedRequest,
-          model,
-          size,
-          n,
-        };
-        if (isAsyncTextModel) {
-          return await this.handleAsyncTextToImage(apiKey, requestWithDefaults, options, size, startTime);
+        if (hasImages) {
+          logInputImages("Gitee", options.requestId, normalizedRequest.images);
         }
 
-        return await this.handleTextToImage(apiKey, requestWithDefaults, options, size, startTime);
-      }
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : String(err);
+        try {
+          if (hasImages) {
+            const selectedModel = this.selectModel(normalizedRequest.model, true);
+            const isAsyncModel = GiteeConfig.asyncEditModels.includes(selectedModel);
+            const taskDefaults = getProviderTaskDefaults("Gitee", "edit");
+            const size = normalizedRequest.size || taskDefaults.size ||
+              (isAsyncModel ? GiteeConfig.defaultAsyncEditSize : GiteeConfig.defaultEditSize);
+            // 此时 singleRequest.n 应该已经被拆分处理，通常为 1
+            const n = normalizedRequest.n ?? taskDefaults.n ?? 1;
 
-      return {
-        success: false,
-        error: errorMessage,
-        model: normalizedRequest.model || this.config.defaultModel,
-        provider: "Gitee",
-      };
-    }
+            const requestWithDefaults: ImageGenerationRequest = {
+              ...normalizedRequest,
+              model: selectedModel,
+              size,
+              n,
+            };
+
+            // 检查是否为异步编辑模型
+            if (isAsyncModel) {
+              return await this.handleAsyncEdit(
+                apiKey,
+                requestWithDefaults,
+                options,
+                size,
+                startTime,
+              );
+            } else {
+              return await this.handleSyncEdit(
+                apiKey,
+                requestWithDefaults,
+                options,
+                size,
+                startTime,
+              );
+            }
+          } else {
+            const model = this.selectModel(normalizedRequest.model, false);
+            const isAsyncTextModel = GiteeConfig.asyncTextModels.includes(model);
+            const taskDefaults = getProviderTaskDefaults("Gitee", "text");
+            const size = normalizedRequest.size || taskDefaults.size || GiteeConfig.defaultSize;
+            const n = normalizedRequest.n ?? taskDefaults.n ?? 1;
+
+            const requestWithDefaults: ImageGenerationRequest = {
+              ...normalizedRequest,
+              model,
+              size,
+              n,
+            };
+            if (isAsyncTextModel) {
+              return await this.handleAsyncTextToImage(
+                apiKey,
+                requestWithDefaults,
+                options,
+                size,
+                startTime,
+              );
+            }
+
+            return await this.handleTextToImage(
+              apiKey,
+              requestWithDefaults,
+              options,
+              size,
+              startTime,
+            );
+          }
+        } catch (err) {
+          const errorMessage = err instanceof Error ? err.message : String(err);
+
+          return {
+            success: false,
+            error: errorMessage,
+            model: normalizedRequest.model || this.config.defaultModel,
+            provider: "Gitee",
+          };
+        }
+      },
+    );
   }
 
   /**
    * 融合生图 (Blend) 实现
-   * 
+   *
    * 指南场景 E：基于编辑模型的深度定制。
    * 逻辑：提取 Messages 中的所有图片和 Prompt，转换为标准 ImageGenerationRequest，
    * 然后复用 generate 方法的自动分发逻辑 (同步/异步)。
@@ -201,7 +240,9 @@ export class GiteeProvider extends BaseProvider {
   /**
    * 从消息列表中提取 Prompt 和图片
    */
-  private extractPromptAndImagesFromMessages(messages: Message[]): { prompt: string; images: string[] } {
+  private extractPromptAndImagesFromMessages(
+    messages: Message[],
+  ): { prompt: string; images: string[] } {
     const images: string[] = [];
 
     for (const msg of messages) {
@@ -214,7 +255,9 @@ export class GiteeProvider extends BaseProvider {
           const nonStandard = item as NonStandardImageContentItem;
           const mediaType = nonStandard.mediaType || "image/png";
           const base64Str = nonStandard.image;
-          images.push(base64Str.startsWith("data:") ? base64Str : `data:${mediaType};base64,${base64Str}`);
+          images.push(
+            base64Str.startsWith("data:") ? base64Str : `data:${mediaType};base64,${base64Str}`,
+          );
         }
       }
     }
@@ -259,7 +302,7 @@ export class GiteeProvider extends BaseProvider {
     const giteeRequest = {
       model,
       prompt: request.prompt,
-      n: 1, // 核心优化：Gitee 官方限制文生图数量只能为 1
+      n: request.n || 1, // 动态适配并发拆分后的 n (通常为 1)
       size,
       response_format: "b64_json", // 核心优化：直接请求 Base64
     };
@@ -331,7 +374,7 @@ export class GiteeProvider extends BaseProvider {
           body: JSON.stringify({
             model,
             prompt: request.prompt,
-            n: 1, // 核心优化：Gitee 官方限制异步文生图数量只能为 1
+            n: request.n || 1, // 动态适配并发拆分后的 n
             size,
             response_format: "b64_json",
           }),
@@ -353,13 +396,10 @@ export class GiteeProvider extends BaseProvider {
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       await new Promise((resolve) => setTimeout(resolve, 2000));
 
-      const statusResponse = await fetchWithTimeout(`${GiteeConfig.taskStatusUrl}/${taskId}`,
-        {
-          method: "GET",
-          headers: { "Authorization": `Bearer ${apiKey}` },
-        },
-        options.timeoutMs,
-      );
+      const statusResponse = await fetchWithTimeout(`${GiteeConfig.taskStatusUrl}/${taskId}`, {
+        method: "GET",
+        headers: { "Authorization": `Bearer ${apiKey}` },
+      }, options.timeoutMs);
 
       if (!statusResponse.ok) continue;
 
@@ -373,7 +413,12 @@ export class GiteeProvider extends BaseProvider {
           throw new Error("Gitee 异步文生图返回了非 Base64 数据，请检查 API 响应格式设置");
         }
 
-        logImageGenerationComplete("Gitee", options.requestId, imageData.length, Date.now() - startTime);
+        logImageGenerationComplete(
+          "Gitee",
+          options.requestId,
+          imageData.length,
+          Date.now() - startTime,
+        );
 
         return { success: true, images: imageData, model, provider: "Gitee" };
       }
@@ -407,7 +452,7 @@ export class GiteeProvider extends BaseProvider {
     formData.append("model", model);
     formData.append("prompt", request.prompt || "");
     formData.append("size", size);
-    formData.append("n", "1"); // 核心优化：Gitee 官方限制同步编辑图片数量只能为 1
+    formData.append("n", String(request.n || 1)); // 动态适配并发拆分后的 n
     formData.append("response_format", "b64_json"); // 核心优化：直接请求 Base64
 
     // 处理输入图片：统一转 Blob 并通过 FormData 上传
@@ -492,7 +537,7 @@ export class GiteeProvider extends BaseProvider {
     formData.append("model", model);
     formData.append("prompt", request.prompt || "");
     formData.append("size", asyncSize);
-    formData.append("n", "1"); // 核心优化：Gitee 官方限制异步编辑图片数量只能为 1
+    formData.append("n", String(request.n || 1)); // 动态适配并发拆分后的 n
     // 核心优化：提交任务时就指定 response_format 为 b64_json
     formData.append("response_format", "b64_json");
 
@@ -604,7 +649,9 @@ export class GiteeProvider extends BaseProvider {
         const nested = data as Record<string, unknown>;
         const nestedB64 = nested["b64_json"];
         if (typeof nestedB64 === "string") {
-          images.push({ b64_json: nestedB64.startsWith("data:") ? nestedB64.split(",")[1] : nestedB64 });
+          images.push({
+            b64_json: nestedB64.startsWith("data:") ? nestedB64.split(",")[1] : nestedB64,
+          });
         }
       }
     }
