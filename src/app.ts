@@ -961,7 +961,7 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
             model: body.model || "gpt-3.5-turbo",
           });
 
-          return new Response(JSON.stringify({ ok: true, message: result }), {
+          return new Response(JSON.stringify({ ok: true, message: result.reply, url: result.url, model: result.model }), {
             headers: { "Content-Type": "application/json" },
           });
         } catch (e) {

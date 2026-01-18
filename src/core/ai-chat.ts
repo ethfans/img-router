@@ -59,13 +59,21 @@ export class AiChatService {
   /**
    * 测试连接
    */
-  public async testConnection(config: { baseUrl: string; apiKey: string; model: string }): Promise<string> {
-    return await this.callLLM(
+  public async testConnection(config: { baseUrl: string; apiKey: string; model: string }): Promise<{ reply: string; url: string; model: string }> {
+    const url = this.buildChatCompletionsUrl(config.baseUrl);
+    const reply = await this.callLLM(
       "You are a helpful assistant.",
       "Hello, this is a connection test. Reply with 'Connection Successful'.",
       "Test Connection",
-      config
+      config,
+      { strict: true },
     );
+
+    if (!/connection successful/i.test(reply)) {
+      throw new Error(`连接测试未通过：LLM返回内容不符合预期：${reply}`);
+    }
+
+    return { reply, url, model: config.model };
   }
 
   /**
@@ -119,57 +127,106 @@ export class AiChatService {
     system: string, 
     user: string, 
     context: string, 
-    overrideConfig?: { baseUrl: string; apiKey: string; model: string }
+    overrideConfig?: { baseUrl: string; apiKey: string; model: string },
+    options?: { strict?: boolean },
   ): Promise<string> {
     const globalConfig = getAiChatConfig();
     const config = overrideConfig || globalConfig;
 
     if (!config || !config.baseUrl || !config.apiKey) {
+      if (options?.strict) {
+        throw new Error("AI Chat 未配置：缺少 Base URL 或 API Key");
+      }
       warn("AiChat", "AI Chat service not configured (missing URL or Key). Skipping.");
       return user;
     }
 
     try {
       debug("AiChat", `Starting ${context}...`);
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s 超时 (给翻译/扩充留出更多时间)
+      
+      const doRequest = async (targetUrl: string) => {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s 超时
+
+        try {
+          const response = await fetch(targetUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${config.apiKey}`,
+            },
+            body: JSON.stringify({
+              messages: [
+                { role: "system", content: system },
+                { role: "user", content: user },
+              ],
+              model: config.model || "翻译",
+              temperature: 0.7,
+            }),
+            signal: controller.signal,
+          });
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`LLM API Error (${response.status}): ${errorText}`);
+          }
+
+          const data = await response.json();
+          const text = data.choices?.[0]?.message?.content;
+
+          if (!text) {
+            throw new Error("Empty response from LLM");
+          }
+          return text.trim();
+        } finally {
+          clearTimeout(timeoutId);
+        }
+      };
 
       const url = this.buildChatCompletionsUrl(config.baseUrl);
+      try {
+        const text = await doRequest(url);
+        debug("AiChat", `${context} result: ${text.substring(0, 50)}...`);
+        return text;
+      } catch (e) {
+        // 智能重试：如果是因为 localhost 连接拒绝，尝试 host.docker.internal
+        const errStr = String(e);
+        const isLocalhost = config.baseUrl.includes("localhost") || config.baseUrl.includes("127.0.0.1");
+        const isConnError = errStr.includes("Connection refused") || errStr.includes("os error 111") || errStr.includes("client error");
 
-      const response = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${config.apiKey}`,
-        },
-        body: JSON.stringify({
-          messages: [
-            { role: "system", content: system },
-            { role: "user", content: user },
-          ],
-          model: config.model || "gpt-3.5-turbo", // 默认模型
-          temperature: 0.7,
-        }),
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`LLM API Error (${response.status}): ${errorText}`);
+        if (isLocalhost && isConnError) {
+          const newBaseUrl = config.baseUrl
+            .replace("localhost", "host.docker.internal")
+            .replace("127.0.0.1", "host.docker.internal");
+          
+          warn("AiChat", `Connection to localhost failed. Retrying with host.docker.internal: ${newBaseUrl}`);
+          
+          try {
+            const retryUrl = this.buildChatCompletionsUrl(newBaseUrl);
+            warn("AiChat", `Retrying connection with: ${retryUrl}`);
+            const text = await doRequest(retryUrl);
+            debug("AiChat", `${context} retry success with host.docker.internal`);
+            return text;
+          } catch (retryError) {
+             warn("AiChat", `Retry with host.docker.internal also failed: ${retryError}`);
+             // 明确抛出重试失败的错误，并提供诊断建议
+             throw new Error(
+               `连接 localhost 失败 (Connection Refused)。\n` +
+               `已尝试自动重试 host.docker.internal 但仍失败。\n` +
+               `这通常是因为：\n` +
+               `1. AI 终端容器未在宿主机映射端口；\n` +
+               `2. Windows 防火墙拦截了端口的入站连接；\n` +
+               `3. AI 终端未监听 0.0.0.0。\n` +
+               `建议：尝试使用 AI 终端的容器名称代替 localhost。`
+             );
+          }
+        }
+        throw e;
       }
-
-      const data = await response.json();
-      const text = data.choices?.[0]?.message?.content;
-
-      if (!text) {
-        throw new Error("Empty response from LLM");
-      }
-
-      debug("AiChat", `${context} result: ${text.substring(0, 50)}...`);
-      return text.trim();
     } catch (e) {
+      if (options?.strict) {
+        throw e;
+      }
       warn(
         "AiChat",
         `${context} failed: ${e instanceof Error ? e.message : String(e)}. Using original text.`,

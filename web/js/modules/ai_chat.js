@@ -186,18 +186,53 @@ function renderDropdownContent(dropdown, models) {
  */
 async function testConnection(btn) {
   const container = document.getElementById("aiChatContainer");
+  const ensureResultEl = () => {
+    const existing = document.getElementById("connectionTestResult");
+    if (existing) return existing;
+
+    if (!container) return null;
+
+    const h4 = container.querySelector(".form-section .form-header h4");
+    if (!h4) return null;
+
+    h4.style.display = "flex";
+    h4.style.alignItems = "center";
+
+    const titleSpan = document.createElement("span");
+    titleSpan.textContent = h4.textContent || "基础配置";
+
+    h4.textContent = "";
+    h4.appendChild(titleSpan);
+
+    const el = document.createElement("span");
+    el.id = "connectionTestResult";
+    el.style.flex = "1";
+    el.style.textAlign = "center";
+    el.style.fontWeight = "normal";
+    el.style.fontSize = "0.95rem";
+    h4.appendChild(el);
+    return el;
+  };
+
+  const resultEl = ensureResultEl();
   const baseUrl = container.querySelector('[data-field="baseUrl"]').value;
   const apiKey = container.querySelector('[data-field="apiKey"]').value;
   const model = container.querySelector('[data-field="model"]').value;
 
+  if (resultEl) resultEl.innerHTML = "";
+
   if (!baseUrl || !apiKey) {
-    alert("请先填写 Base URL 和 API Key");
+    if (resultEl) {
+      resultEl.innerHTML = '<span style="color: var(--error-color, #ef4444);">请先填写 Base URL 和 API Key</span>';
+    }
     return;
   }
 
   const originalText = btn.innerHTML;
   btn.innerHTML = '<i class="ri-loader-4-line ri-spin"></i> 测试中...';
   btn.disabled = true;
+  
+  const startTime = performance.now();
 
   try {
     const res = await apiFetch("/api/tools/test-ai-chat", {
@@ -205,14 +240,25 @@ async function testConnection(btn) {
       body: JSON.stringify({ baseUrl, apiKey, model }),
     });
     
+    const endTime = performance.now();
+    const duration = ((endTime - startTime) / 1000).toFixed(2);
+
     const data = await res.json();
-    if (res.ok && data.ok) {
-      alert(`连接成功！\nLLM 回复: ${data.message}`);
-    } else {
-      alert(`连接失败: ${data.error || "未知错误"}`);
+    
+    if (resultEl) {
+      if (res.ok && data.ok) {
+        resultEl.innerHTML = `<span style="color: var(--success-color, #10b981);">连接成功！(${duration}s) LLM回复: ${data.message}</span>`;
+      } else {
+        const errorMsg = data.error || "未知错误";
+        resultEl.innerHTML = `<span style="color: var(--error-color, #ef4444);">连接失败 (${duration}s): ${res.status} ${errorMsg}</span>`;
+      }
     }
   } catch (e) {
-    alert(`请求出错: ${e.message}`);
+    const endTime = performance.now();
+    const duration = ((endTime - startTime) / 1000).toFixed(2);
+    if (resultEl) {
+        resultEl.innerHTML = `<span style="color: var(--error-color, #ef4444);">请求出错 (${duration}s): ${e.message}</span>`;
+    }
   } finally {
     btn.innerHTML = originalText;
     btn.disabled = false;
@@ -236,7 +282,10 @@ async function loadAiChatConfig() {
     container.innerHTML = `
             <div class="form-section" style="padding: 16px;">
                 <div class="form-header">
-                    <h4 style="margin: 0; font-size: 1rem; color: var(--text-primary);">基础配置</h4>
+                    <h4 style="margin: 0; font-size: 1rem; color: var(--text-primary); display: flex; align-items: center;">
+                        <span>基础配置</span>
+                        <span id="connectionTestResult" style="flex: 1; text-align: center; font-weight: normal; font-size: 0.95rem;"></span>
+                    </h4>
                     <p style="margin: 4px 0 0; font-size: 0.8rem; color: var(--text-secondary);">配置兼容 OpenAI 格式的 LLM 服务</p>
                 </div>
                 <div class="form-grid" style="grid-template-columns: 1fr 1fr;">
@@ -348,7 +397,7 @@ function updateSaveStatus(status) {
     }
 }
 
-function debouncedSave(container) {
+function debouncedSave(_container) {
   updateSaveStatus("unsaved");
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {

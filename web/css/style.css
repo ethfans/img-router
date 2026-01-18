@@ -28,10 +28,22 @@
 }
 
 body {
-  background-color: var(--background);
+  background-color: var(--bg-main); /* 页面背景色统一 */
   color: var(--text-primary);
   min-height: 100vh;
   display: flex;
+  justify-content: center; /* 水平居中 */
+}
+
+/* 居中布局容器 */
+#app-container {
+  width: 100%;
+  max-width: 1920px; /* 限制最大宽度 */
+  background: var(--background);
+  min-height: 100vh;
+  display: flex; /* Flex 布局让 Sidebar 和 Main 并排 */
+  position: relative;
+  box-shadow: 0 0 40px rgba(0, 0, 0, 0.05); /* 增加阴影，在大屏下区分边界 */
 }
 
 /* Sidebar */
@@ -39,13 +51,14 @@ body {
   width: var(--sidebar-width);
   background: var(--surface);
   height: 100vh;
-  position: fixed;
-  left: 0;
+  position: sticky; /* 使用 Sticky 确保随页面滚动但保持在视野 */
   top: 0;
+  left: 0;
   border-right: 1px solid rgba(0, 0, 0, 0.05);
   z-index: 100;
   display: flex;
   flex-direction: column;
+  flex-shrink: 0; /* 防止被挤压 */
 }
 
 .logo-box {
@@ -132,15 +145,15 @@ body {
 
 /* Main Content */
 .main-content {
-  margin-left: var(--sidebar-width);
+  /* margin-left: var(--sidebar-width); Removed for flex layout */
   flex: 1;
   padding: 24px;
-  max-width: 1600px;
+  max-width: 100%; /* Changed from fixed max-width to fill container */
   /* Flex layout for full height viewport */
-  height: 100vh;
+  min-height: 100vh; /* Changed from height: 100% to min-height */
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow-x: hidden; /* Prevent horizontal scroll */
 }
 
 .header {
@@ -422,6 +435,104 @@ input:checked + .slider:before {
   flex: 1;
   overflow-y: auto;
   /* padding-right: 4px; Remove custom padding that might look like a track */
+}
+
+@media (max-width: 1200px) {
+  .main-content {
+    max-width: none;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  body {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    position: static;
+    width: 100%;
+    height: auto;
+    flex-direction: row;
+    align-items: center;
+    overflow-x: auto;
+  }
+
+  .logo-box {
+    height: auto;
+    padding: 12px 16px;
+    flex-shrink: 0;
+  }
+
+  .nav-menu {
+    padding: 8px 12px;
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
+    overflow-x: auto;
+  }
+
+  .nav-group {
+    margin-bottom: 0;
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
+  }
+
+  .nav-title {
+    display: none;
+  }
+
+  .nav-item {
+    margin-bottom: 0;
+    white-space: nowrap;
+  }
+
+  .main-content {
+    margin-left: 0;
+    height: auto;
+    overflow: visible;
+    padding: 12px;
+  }
+
+  #main-container {
+    overflow: visible;
+  }
+
+  .dashboard-grid {
+    height: auto;
+    overflow: visible;
+  }
+
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .form-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .form-group[style*="display: flex"] {
+    flex-wrap: wrap !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .main-content {
+    padding: 10px;
+  }
+
+  .card,
+  .form-section {
+    padding: 12px;
+  }
+
+  .btn {
+    padding: 10px 14px;
+  }
 }
 
 /* Dashboard specific layout */
