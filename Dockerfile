@@ -1,6 +1,8 @@
 FROM denoland/deno:latest
 WORKDIR /app
 
+RUN apt-get update && apt-get install -y docker.io docker-compose && rm -rf /var/lib/apt/lists/*
+
 # 复制配置文件
 COPY deno.json .
 COPY deno.lock .
@@ -13,4 +15,4 @@ COPY web/ ./web/
 RUN deno cache src/main.ts
 
 EXPOSE 10001
-CMD ["run", "--allow-net", "--allow-env", "--allow-read", "--allow-write", "src/main.ts"]
+CMD ["run", "--allow-net", "--allow-env", "--allow-read", "--allow-write", "--allow-run=docker,docker-compose", "src/main.ts"]

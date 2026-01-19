@@ -48,12 +48,14 @@ export async function renderGallery(container) {
                         <button class="btn secondary-btn" id="btn-select-mode">
                             <i class="ri-checkbox-multiple-line"></i> 选择
                         </button>
-                        <div id="selection-actions" style="display: none; gap: 8px;">
-                            <span id="selection-count" style="margin-right: 8px; font-size: 14px;">已选 0</span>
-                            <button class="btn danger-btn" id="btn-delete-selected">
-                                <i class="ri-delete-bin-line"></i> 删除
-                            </button>
-                            <button class="btn secondary-btn" id="btn-cancel-select">取消</button>
+                        <div id="selection-actions" style="display: none; gap: 12px; align-items: center;">
+                            <span id="selection-count" style="font-size: 14px; color: var(--text-secondary); font-weight: 500;">已选 0</span>
+                            <div style="display: flex; gap: 8px;">
+                                <button class="btn danger-btn" id="btn-delete-selected">
+                                    <i class="ri-delete-bin-line"></i> 删除
+                                </button>
+                                <button class="btn secondary-btn" id="btn-cancel-select">取消</button>
+                            </div>
                         </div>
                         <button class="btn primary-btn" onclick="location.reload()" style="margin-left: 8px;">
                             <i class="ri-refresh-line"></i> 刷新

@@ -36,28 +36,28 @@ export class WeightedRouter {
 
         // 获取该渠道该任务的配置
         const defaults = getProviderTaskDefaults(provider.name, task);
-        
+
         // 检查 modelMap 是否匹配
         // modelMap 可能是逗号分隔的字符串
         if (defaults.modelMap) {
-          const mappedIds = defaults.modelMap.split(/[,，]/).map(s => s.trim());
+          const mappedIds = defaults.modelMap.split(/[,，]/).map((s) => s.trim());
           if (mappedIds.includes(preferredModel)) {
-             // 匹配成功！
-             // 目标模型优先使用 override model，如果没有则使用 default model
-             // 但我们需要确定 override model 是存在的。
-             // 通常 defaults.model 就是用户在 UI 上配置的“模型”列。
-             const targetModel = defaults.model || provider.config.defaultModel;
-             const weight = defaults.weight ?? 10;
-             
-             // 检查能力
-             let supportsTask = false;
-             if (task === "text" && provider.capabilities.textToImage) supportsTask = true;
-             if (task === "edit" && provider.capabilities.imageToImage) supportsTask = true;
-             if (task === "blend" && provider.capabilities.multiImageFusion) supportsTask = true;
+            // 匹配成功！
+            // 目标模型优先使用 override model，如果没有则使用 default model
+            // 但我们需要确定 override model 是存在的。
+            // 通常 defaults.model 就是用户在 UI 上配置的“模型”列。
+            const targetModel = defaults.model || provider.config.defaultModel;
+            const weight = defaults.weight ?? 10;
 
-             if (supportsTask) {
-                candidates.push({ provider, weight, targetModel });
-             }
+            // 检查能力
+            let supportsTask = false;
+            if (task === "text" && provider.capabilities.textToImage) supportsTask = true;
+            if (task === "edit" && provider.capabilities.imageToImage) supportsTask = true;
+            if (task === "blend" && provider.capabilities.multiImageFusion) supportsTask = true;
+
+            if (supportsTask) {
+              candidates.push({ provider, weight, targetModel });
+            }
           }
         }
       }
@@ -67,9 +67,9 @@ export class WeightedRouter {
       // 按权重降序排序
       candidates.sort((a, b) => b.weight - a.weight);
 
-      const plan: RouteStep[] = candidates.map(c => ({
+      const plan: RouteStep[] = candidates.map((c) => ({
         provider: c.provider,
-        model: c.targetModel
+        model: c.targetModel,
       }));
 
       debug(

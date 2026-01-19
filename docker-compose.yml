@@ -4,9 +4,9 @@ services:
     image: img-router:latest
     container_name: img-router-proxy
     ports:
-      - "10001:10001"
+      - "10090:10090"
     environment:
-      - PORT=10001
+      - PORT=10090
       - IMAGE_BED_BASE_URL=${IMAGE_BED_BASE_URL}
       - IMAGE_BED_AUTH_CODE=${IMAGE_BED_AUTH_CODE}
       - IMAGE_BED_UPLOAD_FOLDER=${IMAGE_BED_UPLOAD_FOLDER}
@@ -18,6 +18,8 @@ services:
       - ./data:/app/data
       - ./web:/app/web
       - ./src:/app/src
+      - ./docker-compose.yml:/app/docker-compose.yml
+      - /var/run/docker.sock:/var/run/docker.sock
 
 networks:
   default:

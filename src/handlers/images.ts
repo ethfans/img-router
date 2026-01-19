@@ -21,7 +21,7 @@ import type {
 import { providerRegistry } from "../providers/registry.ts";
 import { buildDataUri, urlToBase64 } from "../utils/image.ts";
 import { debug, error, generateRequestId, info, logRequestEnd } from "../core/logger.ts";
-import { weightedRouter, type RouteStep } from "../core/router.ts";
+import { type RouteStep, weightedRouter } from "../core/router.ts";
 import { promptOptimizerService } from "../core/prompt-optimizer.ts";
 import { keyManager } from "../core/key-manager.ts";
 import { storageService } from "../core/storage.ts";
@@ -93,7 +93,10 @@ export async function handleImagesGenerations(req: Request): Promise<Response> {
           headers: { "Content-Type": "application/json" },
         });
       }
-      info("Router", `Plan: ${providerPlan.map((s) => `${s.provider.name}(${s.model})`).join(" -> ")}`);
+      info(
+        "Router",
+        `Plan: ${providerPlan.map((s) => `${s.provider.name}(${s.model})`).join(" -> ")}`,
+      );
     } else {
       // Relay Mode: 仅使用检测到的 Provider
       if (detectedProvider) {
@@ -101,16 +104,16 @@ export async function handleImagesGenerations(req: Request): Promise<Response> {
         // 在 Relay 模式下，我们也尝试解析模型别名，但仅限于该 Provider
         const defaults = getProviderTaskDefaults(detectedProvider.name, "text");
         if (defaults.modelMap === targetModel) {
-             // 如果请求的模型等于映射的别名，则使用默认模型或实际模型
-             // 这里有个问题：ProviderTaskDefaults 里没有存 realId，而是存的 override model
-             // 但我们的设计是 modelMap 只是个别名。
-             // 实际上，如果配置了 modelMap，我们应该假设用户想要的是 defaultModel (override model)
-             if (defaults.model) {
-                 targetModel = defaults.model;
-                 info("Router", `Relay Mode: Redirect model ${requestBody.model} -> ${targetModel}`);
-             }
+          // 如果请求的模型等于映射的别名，则使用默认模型或实际模型
+          // 这里有个问题：ProviderTaskDefaults 里没有存 realId，而是存的 override model
+          // 但我们的设计是 modelMap 只是个别名。
+          // 实际上，如果配置了 modelMap，我们应该假设用户想要的是 defaultModel (override model)
+          if (defaults.model) {
+            targetModel = defaults.model;
+            info("Router", `Relay Mode: Redirect model ${requestBody.model} -> ${targetModel}`);
+          }
         }
-        
+
         providerPlan = [{ provider: detectedProvider, model: targetModel }];
       }
     }
@@ -251,9 +254,9 @@ export async function handleImagesGenerations(req: Request): Promise<Response> {
             if (filename) info("Storage", `Auto-saved image: ${filename}`);
           });
         }
-  } catch (e) {
-          error("Storage", `Failed to save image: ${e}`);
-        }
+      } catch (e) {
+        error("Storage", `Failed to save image: ${e}`);
+      }
 
       if (desiredFormat === "b64_json") {
         if (img.b64_json) {

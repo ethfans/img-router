@@ -13,10 +13,19 @@ import { handleChatCompletions } from "./handlers/chat.ts";
 import { handleImagesGenerations } from "./handlers/images.ts";
 import { handleImagesEdits } from "./handlers/edits.ts";
 import { handleImagesBlend } from "./handlers/blend.ts";
-import { addLogStream, debug, getRecentLogs, info, type LogEntry, LogLevel, error } from "./core/logger.ts";
+import {
+  addLogStream,
+  debug,
+  error,
+  getRecentLogs,
+  info,
+  type LogEntry,
+  LogLevel,
+} from "./core/logger.ts";
 import { type RequestContext, withLogging } from "./middleware/logging.ts";
 import * as Config from "./config/manager.ts";
 import {
+  getAppVersion,
   getKeyPool,
   getRuntimeConfig,
   type ProviderTaskDefaults,
@@ -33,6 +42,7 @@ console.log("Loading app.ts...");
 import { promptOptimizerService } from "./core/prompt-optimizer.ts";
 import { storageService } from "./core/storage.ts";
 import type { ProviderName } from "./providers/base.ts";
+import { join } from "@std/path";
 
 // 调试日志：确保 promptOptimizerService 已加载
 console.log("[App] promptOptimizerService loaded:", !!promptOptimizerService);
@@ -67,6 +77,715 @@ async function saveCacheToDisk(cache: UpdateCache) {
   } catch (e) {
     error("Update", `Failed to save cache to disk: ${e}`);
   }
+}
+
+async function updateDockerComposePort(port: number) {
+  const composePath = join(Deno.cwd(), "docker-compose.yml");
+
+  try {
+    const content = await Deno.readTextFile(composePath);
+    const lines = content.split(/\r?\n/);
+    let changed = false;
+    let matched = false;
+
+    const updatedLines = lines.map((line) => {
+      const envMatch = line.match(/^(\s*-\s*PORT\s*=\s*)(\d+)(\s*)$/);
+      if (envMatch) {
+        changed = true;
+        matched = true;
+        return `${envMatch[1]}${port}${envMatch[3]}`;
+      }
+
+      const quotedPortMatch = line.match(/^(\s*-\s*")\s*(\d+)\s*:\s*(\d+)\s*("\s*)$/);
+      if (quotedPortMatch) {
+        changed = true;
+        matched = true;
+        return `${quotedPortMatch[1]}${port}:${port}${quotedPortMatch[4]}`;
+      }
+
+      const plainPortMatch = line.match(/^(\s*-\s*)(\d+)\s*:\s*(\d+)\s*$/);
+      if (plainPortMatch) {
+        changed = true;
+        matched = true;
+        return `${plainPortMatch[1]}${port}:${port}`;
+      }
+
+      return line;
+    });
+
+    if (changed) {
+      await Deno.writeTextFile(composePath, updatedLines.join("\n"));
+    }
+
+    if (!matched) {
+      return { updated: false, path: composePath, error: "未找到PORT或端口映射配置" };
+    }
+
+    return { updated: changed, path: composePath };
+  } catch (e) {
+    return { updated: false, path: composePath, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+type RestartDockerComposeAttempt = {
+  cmd: string;
+  args: string[];
+  code?: number;
+  stdout?: string;
+  stderr?: string;
+  error?: string;
+};
+
+type RestartDockerComposeResult =
+  | {
+    ok: true;
+    cmd: string;
+    args: string[];
+    code: number;
+    stdout: string;
+    stderr: string;
+    attempted: RestartDockerComposeAttempt[];
+  }
+  | {
+    ok: false;
+    error: string;
+    attempted: RestartDockerComposeAttempt[];
+  };
+
+async function dockerSocketRequest(
+  method: string,
+  path: string,
+  body?: unknown,
+  options?: { timeoutMs?: number },
+): Promise<{ status: number; bodyText: string }> {
+  const timeoutMs = options?.timeoutMs ?? 15_000;
+  const socketPath = "/var/run/docker.sock";
+  const conn = await Deno.connect({ path: socketPath, transport: "unix" });
+
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    try {
+      conn.close();
+    } catch (e) {
+      void e;
+    }
+  }, timeoutMs);
+
+  try {
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
+
+    const bodyText = body === undefined ? "" : JSON.stringify(body);
+    const bodyBytes = encoder.encode(bodyText);
+
+    const headerLines: string[] = [
+      `${method} ${path} HTTP/1.1`,
+      "Host: docker",
+      "Connection: close",
+    ];
+
+    if (body === undefined) {
+      headerLines.push("Content-Length: 0");
+    } else {
+      headerLines.push("Content-Type: application/json");
+      headerLines.push(`Content-Length: ${bodyBytes.byteLength}`);
+    }
+
+    const requestHead = headerLines.join("\r\n") + "\r\n\r\n";
+    await conn.write(encoder.encode(requestHead));
+    if (bodyBytes.byteLength > 0) {
+      await conn.write(bodyBytes);
+    }
+
+    const chunks: Uint8Array[] = [];
+    const buf = new Uint8Array(64 * 1024);
+    while (true) {
+      const n = await conn.read(buf);
+      if (n === null) break;
+      chunks.push(buf.slice(0, n));
+    }
+
+    const raw = decoder.decode(concatChunks(chunks));
+    const sep = "\r\n\r\n";
+    const idx = raw.indexOf(sep);
+    const head = idx >= 0 ? raw.slice(0, idx) : raw;
+    let bodyOut = idx >= 0 ? raw.slice(idx + sep.length) : "";
+
+    const headLines = head.split("\r\n");
+    const statusLine = headLines[0] || "";
+    const match = statusLine.match(/HTTP\/\d\.\d\s+(\d+)/);
+    const status = match ? Number(match[1]) : 0;
+
+    const headers: Record<string, string> = {};
+    for (const line of headLines.slice(1)) {
+      const p = line.indexOf(":");
+      if (p <= 0) continue;
+      const key = line.slice(0, p).trim().toLowerCase();
+      const value = line.slice(p + 1).trim();
+      headers[key] = value;
+    }
+
+    const transferEncoding = headers["transfer-encoding"] || "";
+    if (transferEncoding.toLowerCase().includes("chunked")) {
+      bodyOut = decodeChunkedBody(bodyOut);
+    }
+
+    return { status, bodyText: bodyOut };
+  } catch (e) {
+    if (timedOut) {
+      throw new Error(`Docker Socket 请求超时（${timeoutMs}ms）`);
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+    try {
+      conn.close();
+    } catch (e) {
+      void e;
+    }
+  }
+}
+
+function decodeChunkedBody(body: string) {
+  let i = 0;
+  let out = "";
+  while (i < body.length) {
+    const lineEnd = body.indexOf("\r\n", i);
+    if (lineEnd < 0) break;
+    const sizeLine = body.slice(i, lineEnd).trim();
+    const size = Number.parseInt(sizeLine, 16);
+    if (!Number.isFinite(size) || size < 0) break;
+    i = lineEnd + 2;
+    if (size === 0) break;
+    out += body.slice(i, i + size);
+    i = i + size + 2;
+  }
+  return out;
+}
+
+function tryParseJson(text: string): unknown | null {
+  try {
+    return JSON.parse(text);
+  } catch {
+    const firstObj = text.indexOf("{");
+    const firstArr = text.indexOf("[");
+    const start = firstObj >= 0 && firstArr >= 0
+      ? Math.min(firstObj, firstArr)
+      : (firstObj >= 0 ? firstObj : firstArr);
+
+    const lastObj = text.lastIndexOf("}");
+    const lastArr = text.lastIndexOf("]");
+    const end = Math.max(lastObj, lastArr);
+
+    if (start >= 0 && end > start) {
+      const sliced = text.slice(start, end + 1);
+      try {
+        return JSON.parse(sliced);
+      } catch {
+        return null;
+      }
+    }
+
+    return null;
+  }
+}
+
+function getComposeProjectFromInspect(inspect: Record<string, unknown>): string | null {
+  const config = (inspect.Config as Record<string, unknown> | undefined) || {};
+  const labels = config.Labels;
+  if (!labels || typeof labels !== "object") return null;
+  const project = (labels as Record<string, unknown>)["com.docker.compose.project"];
+  return typeof project === "string" && project.length > 0 ? project : null;
+}
+
+function getComposeProjectFromLabels(labels: unknown): string | null {
+  if (!labels || typeof labels !== "object") return null;
+  const project = (labels as Record<string, unknown>)["com.docker.compose.project"];
+  return typeof project === "string" && project.length > 0 ? project : null;
+}
+
+function getComposeServiceFromInspect(inspect: Record<string, unknown>): string | null {
+  const config = (inspect.Config as Record<string, unknown> | undefined) || {};
+  const labels = config.Labels;
+  if (!labels || typeof labels !== "object") return null;
+  const service = (labels as Record<string, unknown>)["com.docker.compose.service"];
+  return typeof service === "string" && service.length > 0 ? service : null;
+}
+
+function getImageFromInspect(inspect: Record<string, unknown>): string | null {
+  const config = (inspect.Config as Record<string, unknown> | undefined) || {};
+  const image = config.Image;
+  return typeof image === "string" && image.length > 0 ? image : null;
+}
+
+function normalizeDockerNames(names: unknown): string[] {
+  const raw = Array.isArray(names) ? (names as unknown[]) : [];
+  const out: string[] = [];
+  for (const n of raw) {
+    if (typeof n !== "string") continue;
+    out.push(n.startsWith("/") ? n.slice(1) : n);
+  }
+  return out;
+}
+
+function isOldContainerName(names: string[]): boolean {
+  const re = /-old-\d+$/;
+  return names.some((n) => re.test(n));
+}
+
+function compactStrings(values: Array<string | null | undefined>): string[] {
+  return values.filter((v): v is string => typeof v === "string" && v.length > 0);
+}
+
+async function inspectSelfContainer(): Promise<
+  | { inspect: Record<string, unknown>; containerId: string; ref: string }
+  | null
+> {
+  const candidates = compactStrings([
+    Deno.env.get("HOSTNAME"),
+    "proxy",
+    "img-router-proxy",
+  ]);
+
+  for (const ref of candidates) {
+    try {
+      const resp = await dockerSocketRequest("GET", `/containers/${ref}/json`, undefined, {
+        timeoutMs: 10_000,
+      });
+      if (resp.status !== 200) continue;
+      const parsed = tryParseJson(resp.bodyText);
+      if (!parsed || typeof parsed !== "object") continue;
+      const inspect = parsed as Record<string, unknown>;
+      const id = typeof inspect.Id === "string" && inspect.Id.length > 0 ? inspect.Id : "";
+      if (!id) continue;
+      return { inspect, containerId: id, ref };
+    } catch (e) {
+      void e;
+    }
+  }
+
+  return null;
+}
+
+async function cleanupOldContainersInScope(
+  scope: {
+    project?: string | null;
+    image?: string | null;
+    excludeIds?: Set<string>;
+    baseNames?: string[];
+  },
+): Promise<{ removedIds: string[]; attempted: number; matched: number }> {
+  const removedIds: string[] = [];
+  let attempted = 0;
+  let matched = 0;
+
+  let listResp: { status: number; bodyText: string };
+  try {
+    listResp = await dockerSocketRequest("GET", "/containers/json?all=1", undefined, {
+      timeoutMs: 10_000,
+    });
+  } catch (e) {
+    info(
+      "Docker",
+      `Old container list failed: ${e instanceof Error ? e.message : String(e)}`,
+    );
+    return { removedIds, attempted, matched };
+  }
+  if (listResp.status !== 200) {
+    info(
+      "Docker",
+      `Old container list failed: status=${listResp.status} body=${
+        listResp.bodyText.slice(0, 200)
+      }`,
+    );
+    return { removedIds, attempted, matched };
+  }
+
+  const parsed = tryParseJson(listResp.bodyText);
+  if (!Array.isArray(parsed)) {
+    info(
+      "Docker",
+      `Old container list parse failed: body=${listResp.bodyText.slice(0, 200)}`,
+    );
+    return { removedIds, attempted, matched };
+  }
+  const list = parsed as Array<Record<string, unknown>>;
+  const excludeIds = scope.excludeIds ?? new Set<string>();
+  const baseNames = (scope.baseNames ?? []).filter((s) => typeof s === "string" && s.length > 0);
+  const project = scope.project ?? null;
+  const image = scope.image ?? null;
+
+  for (const c of list) {
+    const id = typeof c.Id === "string" ? c.Id : "";
+    if (!id || excludeIds.has(id)) continue;
+
+    const labelsProject = getComposeProjectFromLabels(c.Labels);
+    const names = normalizeDockerNames(c.Names);
+    if (!isOldContainerName(names)) continue;
+
+    const matchByProject = !!project && labelsProject === project;
+    const matchByNamePrefix = baseNames.length > 0 &&
+      baseNames.some((base) => names.some((n) => n.startsWith(`${base}-old-`)));
+    const matchByImage = !!image && typeof c.Image === "string" && c.Image === image;
+    if (!matchByProject && !matchByNamePrefix) continue;
+    if (!matchByProject && image && !matchByImage) continue;
+
+    matched++;
+
+    try {
+      attempted++;
+      const delResp = await dockerSocketRequest(
+        "DELETE",
+        `/containers/${id}?force=1`,
+        undefined,
+        {
+          timeoutMs: 20_000,
+        },
+      );
+      if (delResp.status === 204) {
+        removedIds.push(id);
+      } else {
+        info(
+          "Docker",
+          `Old container delete failed: status=${delResp.status} id=${id} name=${
+            names[0] ?? ""
+          } body=${delResp.bodyText.slice(0, 200)}`,
+        );
+      }
+    } catch (e) {
+      info(
+        "Docker",
+        `Old container delete exception: id=${id} name=${names[0] ?? ""} err=${
+          e instanceof Error ? e.message : String(e)
+        }`,
+      );
+    }
+  }
+
+  return { removedIds, attempted, matched };
+}
+
+export async function cleanupOldContainers(): Promise<void> {
+  if (Deno.build.os === "windows") return;
+
+  try {
+    const self = await inspectSelfContainer();
+    if (!self) {
+      info("Docker", "Old container cleanup skipped: cannot inspect self container");
+      return;
+    }
+
+    const inspect = self.inspect;
+    const project = getComposeProjectFromInspect(inspect);
+    const service = getComposeServiceFromInspect(inspect);
+    const image = getImageFromInspect(inspect);
+
+    const currentNameRaw = typeof inspect.Name === "string" ? inspect.Name : "";
+    const currentName = currentNameRaw.startsWith("/") ? currentNameRaw.slice(1) : currentNameRaw;
+    const baseNames = compactStrings([currentName, service]);
+
+    const result = await cleanupOldContainersInScope({
+      project,
+      image,
+      excludeIds: new Set([self.containerId]),
+      baseNames,
+    });
+
+    info(
+      "Docker",
+      `Old container cleanup done: ref=${self.ref} id=${self.containerId.slice(0, 12)} project=${
+        project ?? ""
+      } service=${service ?? ""} image=${image ?? ""} base=${
+        baseNames.join(",")
+      } matched=${result.matched} attempted=${result.attempted} removed=${result.removedIds.length}`,
+    );
+  } catch (e) {
+    info(
+      "Docker",
+      `Old container cleanup failed: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
+}
+
+function scheduleCleanupAfterRestart(detail: unknown) {
+  if (Deno.build.os === "windows") return;
+
+  const d = detail && typeof detail === "object" ? (detail as Record<string, unknown>) : {};
+  const oldId = typeof d.oldContainerId === "string" ? d.oldContainerId : "";
+  const newId = typeof d.newId === "string" ? d.newId : "";
+
+  setTimeout(async () => {
+    if (newId) {
+      const start = Date.now();
+      const waitMs = 30_000;
+      while (Date.now() - start < waitMs) {
+        try {
+          const r = await dockerSocketRequest("GET", `/containers/${newId}/json`, undefined, {
+            timeoutMs: 10_000,
+          });
+          if (r.status === 200) {
+            const ins = JSON.parse(r.bodyText) as Record<string, unknown>;
+            const state = (ins.State as Record<string, unknown> | undefined) || {};
+            if (state && typeof state === "object" && state.Running === true) break;
+          }
+        } catch (e) {
+          void e;
+        }
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    }
+
+    try {
+      await cleanupOldContainers();
+    } catch (e) {
+      info(
+        "Docker",
+        `Old container cleanup after restart failed: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+
+    if (oldId) {
+      try {
+        const del = await dockerSocketRequest(
+          "DELETE",
+          `/containers/${oldId}?force=1`,
+          undefined,
+          { timeoutMs: 30_000 },
+        );
+        info(
+          "Docker",
+          `Old self delete after restart: status=${del.status} id=${oldId.slice(0, 12)}`,
+        );
+      } catch (e) {
+        info(
+          "Docker",
+          `Old self delete after restart failed: id=${oldId.slice(0, 12)} err=${
+            e instanceof Error ? e.message : String(e)
+          }`,
+        );
+      }
+    }
+  }, 8_000);
+}
+
+function concatChunks(chunks: Uint8Array[]) {
+  const total = chunks.reduce((sum, c) => sum + c.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) {
+    out.set(c, offset);
+    offset += c.length;
+  }
+  return out;
+}
+
+function upsertPortEnv(env: string[] | undefined, port: number) {
+  const list = Array.isArray(env) ? [...env] : [];
+  const idx = list.findIndex((s) => s.startsWith("PORT="));
+  const next = `PORT=${port}`;
+  if (idx >= 0) list[idx] = next;
+  else list.push(next);
+  return list;
+}
+
+async function restartViaDockerSocket(
+  containerName: string,
+  port: number,
+): Promise<{ ok: true; detail: unknown } | { ok: false; error: string; detail?: unknown }> {
+  try {
+    const ping = await dockerSocketRequest("GET", "/_ping", undefined, { timeoutMs: 5_000 });
+    if (ping.status !== 200 || !ping.bodyText.includes("OK")) {
+      return { ok: false, error: "Docker Socket 不可用" };
+    }
+
+    const selfId = Deno.env.get("HOSTNAME") || containerName;
+    const inspectResp = await dockerSocketRequest(
+      "GET",
+      `/containers/${selfId}/json`,
+      undefined,
+      { timeoutMs: 10_000 },
+    );
+    if (inspectResp.status !== 200) {
+      return {
+        ok: false,
+        error: `无法 inspect 当前容器: ${selfId}`,
+        detail: inspectResp.bodyText,
+      };
+    }
+    const inspect = JSON.parse(inspectResp.bodyText) as Record<string, unknown>;
+
+    const project = getComposeProjectFromInspect(inspect);
+    const service = getComposeServiceFromInspect(inspect);
+    const image = getImageFromInspect(inspect);
+    const containerId = typeof inspect.Id === "string" && inspect.Id.length > 0
+      ? inspect.Id
+      : selfId;
+
+    const currentNameRaw = typeof inspect.Name === "string" ? inspect.Name : "";
+    const currentName = currentNameRaw.startsWith("/") ? currentNameRaw.slice(1) : currentNameRaw;
+    const oldName = `${currentName || selfId}-old-${Date.now()}`;
+
+    try {
+      const baseNames = compactStrings([currentName, service]);
+      await cleanupOldContainersInScope({
+        project,
+        image,
+        excludeIds: new Set([containerId]),
+        baseNames,
+      });
+    } catch (e) {
+      void e;
+    }
+
+    const renameResp = await dockerSocketRequest(
+      "POST",
+      `/containers/${selfId}/rename?name=${encodeURIComponent(oldName)}`,
+      undefined,
+      { timeoutMs: 10_000 },
+    );
+    if (renameResp.status !== 204) {
+      return { ok: false, error: "重命名旧容器失败", detail: renameResp.bodyText };
+    }
+
+    await dockerSocketRequest(
+      "POST",
+      `/containers/${selfId}/update`,
+      { RestartPolicy: { Name: "no" } },
+      { timeoutMs: 10_000 },
+    );
+
+    const config = (inspect.Config as Record<string, unknown> | undefined) || {};
+    const hostConfig = (inspect.HostConfig as Record<string, unknown> | undefined) || {};
+
+    if (!image) {
+      return { ok: false, error: "无法从 inspect 获取 Image" };
+    }
+
+    const env = upsertPortEnv(config.Env as string[] | undefined, port);
+    const portKey = `${port}/tcp`;
+
+    const createBody: Record<string, unknown> = {
+      Image: image,
+      Env: env,
+      ExposedPorts: { [portKey]: {} },
+      Labels: config.Labels ?? undefined,
+      WorkingDir: config.WorkingDir ?? undefined,
+      Cmd: config.Cmd ?? undefined,
+      Entrypoint: config.Entrypoint ?? undefined,
+      HostConfig: {
+        Binds: hostConfig.Binds ?? undefined,
+        RestartPolicy: hostConfig.RestartPolicy ?? undefined,
+        NetworkMode: hostConfig.NetworkMode ?? undefined,
+        PortBindings: { [portKey]: [{ HostPort: String(port) }] },
+      },
+    };
+
+    const createResp = await dockerSocketRequest(
+      "POST",
+      `/containers/create?name=${encodeURIComponent(currentName || containerName)}`,
+      createBody,
+      { timeoutMs: 30_000 },
+    );
+    if (createResp.status !== 201) {
+      return { ok: false, error: "创建容器失败", detail: createResp.bodyText };
+    }
+    const created = JSON.parse(createResp.bodyText) as Record<string, unknown>;
+    const newId = typeof created.Id === "string" ? created.Id : "";
+    if (!newId) {
+      return { ok: false, error: "创建容器成功但未返回 Id", detail: created };
+    }
+
+    const startResp = await dockerSocketRequest("POST", `/containers/${newId}/start`, undefined, {
+      timeoutMs: 20_000,
+    });
+    if (startResp.status !== 204) {
+      return { ok: false, error: "启动容器失败", detail: startResp.bodyText };
+    }
+
+    return {
+      ok: true,
+      detail: {
+        oldContainerId: containerId,
+        oldContainerName: oldName,
+        newContainerName: currentName || containerName,
+        newId,
+        port,
+      },
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+async function restartDockerCompose(port: number): Promise<RestartDockerComposeResult> {
+  const decoder = new TextDecoder();
+  const attempts: Array<{ cmd: string; args: string[] }> = [
+    { cmd: "docker", args: ["compose", "up", "-d", "--remove-orphans"] },
+    { cmd: "docker-compose", args: ["up", "-d", "--remove-orphans"] },
+  ];
+
+  const attempted: RestartDockerComposeAttempt[] = [];
+
+  if (Deno.build.os !== "windows") {
+    const socket = await restartViaDockerSocket("img-router-proxy", port);
+    if (socket.ok) {
+      return {
+        ok: true,
+        cmd: "docker.sock",
+        args: ["rolling-recreate", "self", String(port)],
+        code: 0,
+        stdout: JSON.stringify(socket.detail),
+        stderr: "",
+        attempted,
+      };
+    }
+    attempted.push({
+      cmd: "docker.sock",
+      args: ["rolling-recreate", "self", String(port)],
+      error: socket.error,
+    });
+  }
+
+  for (const a of attempts) {
+    try {
+      const command = new Deno.Command(a.cmd, {
+        args: a.args,
+        cwd: Deno.cwd(),
+        stdout: "piped",
+        stderr: "piped",
+      });
+      const out = await command.output();
+      const stdout = decoder.decode(out.stdout);
+      const stderr = decoder.decode(out.stderr);
+      attempted.push({ cmd: a.cmd, args: a.args, code: out.code, stdout, stderr });
+
+      if (out.code === 0) {
+        return {
+          ok: true,
+          cmd: a.cmd,
+          args: a.args,
+          code: out.code,
+          stdout,
+          stderr,
+          attempted,
+        };
+      }
+    } catch (e) {
+      attempted.push({
+        cmd: a.cmd,
+        args: a.args,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
+
+  return {
+    ok: false,
+    error:
+      "无法执行重启。docker 命令不可用，且 Docker Socket 方案也失败。请确认 docker-compose.yml 已挂载 /var/run/docker.sock 并重新创建容器。",
+    attempted,
+  };
 }
 
 /**
@@ -105,30 +824,36 @@ async function handleUpdateCheck(req: Request): Promise<Response> {
       // 如果有缓存（即使过期），作为降级返回
       if (updateCache) {
         info("Update", "Serving stale cache due to API error.");
-        return new Response(JSON.stringify({
-          ...(updateCache.data as object),
-          _cached: true,
-          _stale: true
-        }), {
-          headers: { "Content-Type": "application/json" },
-        });
+        return new Response(
+          JSON.stringify({
+            ...(updateCache.data as object),
+            _cached: true,
+            _stale: true,
+          }),
+          {
+            headers: { "Content-Type": "application/json" },
+          },
+        );
       }
-      
+
       // 明确返回限流错误，状态码 200 以便前端解析
-      return new Response(JSON.stringify({ 
-        error: "rate_limit", 
-        message: `GitHub API error: ${res.status}` 
-      }), {
-        status: res.status === 403 ? 429 : 502,
-        headers: { "Content-Type": "application/json" },
-      });
+      return new Response(
+        JSON.stringify({
+          error: "rate_limit",
+          message: `GitHub API error: ${res.status}`,
+        }),
+        {
+          status: res.status === 403 ? 429 : 502,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
     }
 
     const data = await res.json();
     const newCache = { data, timestamp: now };
     updateCache = newCache;
     await saveCacheToDisk(newCache); // 持久化
-    
+
     return new Response(JSON.stringify(data), {
       headers: { "Content-Type": "application/json" },
     });
@@ -136,13 +861,16 @@ async function handleUpdateCheck(req: Request): Promise<Response> {
     error("Update", `Check update failed: ${e}`);
     // 降级：如果有缓存，返回陈旧缓存
     if (updateCache) {
-      return new Response(JSON.stringify({
-        ...(updateCache.data as object),
-        _cached: true,
-        _stale: true
-      }), {
-        headers: { "Content-Type": "application/json" },
-      });
+      return new Response(
+        JSON.stringify({
+          ...(updateCache.data as object),
+          _cached: true,
+          _stale: true,
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+        },
+      );
     }
     return new Response(JSON.stringify({ error: String(e) }), {
       status: 500,
@@ -150,8 +878,6 @@ async function handleUpdateCheck(req: Request): Promise<Response> {
     });
   }
 }
-
-import denoConfig from "../deno.json" with { type: "json" };
 
 function isProviderName(name: string): name is ProviderName {
   return providerRegistry.getNames().includes(name as ProviderName);
@@ -179,16 +905,6 @@ interface KeyPoolUpdatePayload {
   format?: "csv" | "text" | "auto";
 }
 
-// 运行时配置更新请求载荷定义
-interface RuntimeConfigUpdatePayload {
-  system?: Partial<SystemConfig>;
-  providers?: Record<string, Partial<RuntimeProviderConfig>>;
-  provider?: string;
-  task?: string;
-  defaults?: Record<string, unknown>;
-  enabled?: boolean;
-}
-
 /**
  * 鉴权中间件
  *
@@ -196,12 +912,17 @@ interface RuntimeConfigUpdatePayload {
  * 仅当系统配置了 GLOBAL_ACCESS_KEY 时才生效。
  */
 function checkAuth(req: Request): boolean {
-  if (!Config.GLOBAL_ACCESS_KEY) return true;
+  const runtime = getRuntimeConfig();
+  const runtimeKey = runtime.system?.globalAccessKey;
+  const globalKey = typeof runtimeKey === "string" && runtimeKey.length > 0
+    ? runtimeKey
+    : Config.GLOBAL_ACCESS_KEY;
+  if (!globalKey) return true;
   const auth = req.headers.get("Authorization");
   if (!auth) return false;
   const [type, token] = auth.split(" ");
   if (type !== "Bearer") return false;
-  return token === Config.GLOBAL_ACCESS_KEY;
+  return token === globalKey;
 }
 
 /** 健康检查响应 */
@@ -349,9 +1070,9 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
         },
       });
     } catch (_e) {
-        // info("HTTP", `无法加载存储资源 ${pathname}: ${e}`);
-        return handleNotFound();
-      }
+      // info("HTTP", `无法加载存储资源 ${pathname}: ${e}`);
+      return handleNotFound();
+    }
   }
 
   // 画廊 API
@@ -402,7 +1123,7 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
     return new Response(
       JSON.stringify({
         service: "img-router",
-        version: denoConfig.version,
+        version: getAppVersion(),
         docs: "https://github.com/lianwusuoai/img-router",
         ui: "/admin",
       }),
@@ -530,6 +1251,27 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
     // 管理 API：系统配置
     case "/api/config":
       if (method === "GET") {
+        const runtimeConfig = getRuntimeConfig();
+        const runtimeSystem = runtimeConfig.system || {};
+        const resolvedPort = typeof runtimeSystem.port === "number"
+          ? runtimeSystem.port
+          : Config.PORT;
+        const resolvedTimeout = typeof runtimeSystem.apiTimeout === "number"
+          ? runtimeSystem.apiTimeout
+          : Config.API_TIMEOUT_MS;
+        const resolvedMaxBody = typeof runtimeSystem.maxBodySize === "number"
+          ? runtimeSystem.maxBodySize
+          : Config.MAX_REQUEST_BODY_SIZE;
+        const resolvedCors = typeof runtimeSystem.cors === "boolean"
+          ? runtimeSystem.cors
+          : Config.ENABLE_CORS;
+        const resolvedLogging = typeof runtimeSystem.requestLogging === "boolean"
+          ? runtimeSystem.requestLogging
+          : Config.ENABLE_REQUEST_LOGGING;
+        const resolvedHealth = typeof runtimeSystem.healthCheck === "boolean"
+          ? runtimeSystem.healthCheck
+          : Config.ENABLE_HEALTH_CHECK;
+
         const providers = providerRegistry.getNames().flatMap((name) => {
           const p = providerRegistry.get(name, true);
           if (!p) return [];
@@ -538,12 +1280,14 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
           if (name === "Gitee") {
             debug(
               "App",
-              `[API/Config] Gitee Config Snapshot: ${JSON.stringify({
-                textModelsCount: p.config.textModels?.length,
-                editModelsCount: p.config.editModels?.length,
-                blendModelsCount: p.config.blendModels?.length,
-                firstTextModel: p.config.textModels?.[0],
-              })}`
+              `[API/Config] Gitee Config Snapshot: ${
+                JSON.stringify({
+                  textModelsCount: p.config.textModels?.length,
+                  editModelsCount: p.config.editModels?.length,
+                  blendModelsCount: p.config.blendModels?.length,
+                  firstTextModel: p.config.textModels?.[0],
+                })
+              }`,
             );
           }
 
@@ -566,14 +1310,14 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
 
         return new Response(
           JSON.stringify({
-            version: denoConfig.version,
+            version: getAppVersion(),
             textModels: Config.ALL_TEXT_MODELS,
             supportedSizes: Config.SUPPORTED_SIZES,
             providers,
-            runtimeConfig: getRuntimeConfig(),
-            port: Config.PORT,
-            timeout: Config.API_TIMEOUT_MS,
-            maxBody: Config.MAX_REQUEST_BODY_SIZE,
+            runtimeConfig,
+            port: resolvedPort,
+            timeout: resolvedTimeout,
+            maxBody: resolvedMaxBody,
             defaultModel: Config.DEFAULT_IMAGE_MODEL,
             defaultSize: Config.DEFAULT_IMAGE_SIZE,
             defaultQuality: Config.DEFAULT_IMAGE_QUALITY,
@@ -588,10 +1332,10 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
             pollinationsConfigured: !!Config.POLLINATIONS_API_KEY ||
               getKeyPool("Pollinations").some((k) => k.enabled),
             globalAccessKeyConfigured: !!Config.GLOBAL_ACCESS_KEY,
-            cors: Config.ENABLE_CORS,
-            logging: Config.ENABLE_REQUEST_LOGGING,
+            cors: resolvedCors,
+            logging: resolvedLogging,
             verboseLogging: Config.VERBOSE_LOGGING,
-            healthCheck: Config.ENABLE_HEALTH_CHECK,
+            healthCheck: resolvedHealth,
           }),
           {
             headers: { "Content-Type": "application/json" },
@@ -729,7 +1473,7 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
               addedCount++;
             }
 
-            await updateKeyPool(provider, newPool);
+            updateKeyPool(provider, newPool);
             // Security: Mask keys
             const safePool = newPool.map((k) => ({
               ...k,
@@ -750,7 +1494,7 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
             throw new Error("Invalid action");
           }
 
-          await updateKeyPool(provider, newPool);
+          updateKeyPool(provider, newPool);
           // Security: Mask keys
           const safePool = newPool.map((k) => ({
             ...k,
@@ -845,6 +1589,7 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
 
         const current = getRuntimeConfig();
         let changed = false;
+        let composeSync: { updated: boolean; path: string; error?: string } | null = null;
         const nextConfig: RuntimeConfig = {
           providers: { ...current.providers },
           system: { ...current.system },
@@ -859,6 +1604,9 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
           const systemVal = body.system;
           if (isRecord(systemVal)) {
             const systemPatch = systemVal as Partial<SystemConfig>;
+            const requestedPort = typeof systemPatch.port === "number"
+              ? systemPatch.port
+              : undefined;
 
             nextConfig.system = { ...nextConfig.system, ...systemPatch };
 
@@ -867,6 +1615,20 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
               if (globalAccessKey !== undefined) {
                 nextConfig.system!.globalAccessKey =
                   globalAccessKey as SystemConfig["globalAccessKey"];
+              }
+            }
+
+            if (requestedPort !== undefined) {
+              composeSync = await updateDockerComposePort(requestedPort);
+              if (composeSync.error) {
+                error("Config", `docker-compose.yml update failed: ${composeSync.error}`);
+                return new Response(
+                  JSON.stringify({ ok: false, error: composeSync.error, composeSync }),
+                  { status: 500, headers: { "Content-Type": "application/json" } },
+                );
+              }
+              if (composeSync.updated) {
+                info("Config", `docker-compose.yml updated: ${composeSync.path}`);
               }
             }
 
@@ -921,11 +1683,19 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
         }
 
         if (changed) {
-          info("Config", `Runtime config updated. System: ${JSON.stringify(nextConfig.system)}, Providers: ${JSON.stringify(nextConfig.providers)}, Storage: ${JSON.stringify(nextConfig.storage)}`);
-          await replaceRuntimeConfig(nextConfig);
-          return new Response(JSON.stringify({ ok: true, runtimeConfig: getRuntimeConfig() }), {
-            headers: { "Content-Type": "application/json" },
-          });
+          info(
+            "Config",
+            `Runtime config updated. System: ${JSON.stringify(nextConfig.system)}, Providers: ${
+              JSON.stringify(nextConfig.providers)
+            }, Storage: ${JSON.stringify(nextConfig.storage)}`,
+          );
+          replaceRuntimeConfig(nextConfig);
+          return new Response(
+            JSON.stringify({ ok: true, runtimeConfig: getRuntimeConfig(), composeSync }),
+            {
+              headers: { "Content-Type": "application/json" },
+            },
+          );
         }
 
         const payload = body as {
@@ -956,7 +1726,7 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
 
         // 处理启用/禁用状态
         if (typeof enabled === "boolean") {
-          await setProviderEnabled(provider as ProviderName, enabled);
+          setProviderEnabled(provider as ProviderName, enabled);
           if (enabled) {
             providerRegistry.enable(provider as ProviderName);
           } else {
@@ -996,18 +1766,66 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
         const promptOptimizer = defaults.promptOptimizer;
         if (isRecord(promptOptimizer)) {
           taskDefaults.promptOptimizer = {
-            translate: typeof promptOptimizer.translate === "boolean" ? promptOptimizer.translate : undefined,
-            expand: typeof promptOptimizer.expand === "boolean" ? promptOptimizer.expand : undefined,
+            translate: typeof promptOptimizer.translate === "boolean"
+              ? promptOptimizer.translate
+              : undefined,
+            expand: typeof promptOptimizer.expand === "boolean"
+              ? promptOptimizer.expand
+              : undefined,
           };
         }
 
-        await setProviderTaskDefaults(provider as ProviderName, task, taskDefaults);
+        setProviderTaskDefaults(provider as ProviderName, task, taskDefaults);
 
         return new Response(JSON.stringify({ ok: true, runtimeConfig: getRuntimeConfig() }), {
           headers: { "Content-Type": "application/json" },
         });
       }
       return handleMethodNotAllowed(method);
+
+    case "/api/restart-docker":
+      if (method !== "POST") return handleMethodNotAllowed(method);
+      if (!checkAuth(req)) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      {
+        const runtime = getRuntimeConfig();
+        const port = typeof runtime.system?.port === "number" ? runtime.system.port : Config.PORT;
+
+        if (Deno.build.os !== "windows") {
+          try {
+            await cleanupOldContainers();
+          } catch (e) {
+            void e;
+          }
+        }
+
+        const result = await restartDockerCompose(port);
+        if (!result.ok) {
+          error("Docker", JSON.stringify(result));
+          return new Response(JSON.stringify(result), {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (Deno.build.os !== "windows" && result.cmd === "docker.sock") {
+          try {
+            const detail = result.stdout ? JSON.parse(result.stdout) : undefined;
+            scheduleCleanupAfterRestart(detail);
+          } catch (e) {
+            void e;
+          }
+        }
+
+        info("Docker", `docker compose triggered: ${result.cmd} ${result.args.join(" ")}`);
+        return new Response(JSON.stringify(result), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }
 
     // 管理 API: 提示词优化器配置
     case "/api/config/prompt-optimizer":
@@ -1042,9 +1860,7 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
         const nextBaseUrl = typeof body.baseUrl === "string"
           ? body.baseUrl
           : (current?.baseUrl ?? "");
-        const nextModel = typeof body.model === "string"
-          ? body.model
-          : (current?.model ?? "");
+        const nextModel = typeof body.model === "string" ? body.model : (current?.model ?? "");
 
         let nextApiKey: string = current?.apiKey ?? "";
         // 移除脱敏判断，始终更新 apiKey

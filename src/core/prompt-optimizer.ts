@@ -139,7 +139,10 @@ export class PromptOptimizerService {
       if (options?.strict) {
         throw new Error("PromptOptimizer 未配置：缺少 Base URL 或 API Key");
       }
-      info("PromptOptimizer", "PromptOptimizer service not configured (missing URL or Key). Skipping.");
+      info(
+        "PromptOptimizer",
+        "PromptOptimizer service not configured (missing URL or Key). Skipping.",
+      );
       return user;
     }
 

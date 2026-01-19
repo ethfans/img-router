@@ -31,8 +31,8 @@ import { getProviderTaskDefaults } from "../config/manager.ts";
 import { fetchWithTimeout, urlToBase64 } from "../utils/index.ts";
 import { parseErrorMessage } from "../core/error-handler.ts";
 import {
-  info,
   debug,
+  info,
   logFullPrompt,
   logGeneratedImages,
   logImageGenerationComplete,

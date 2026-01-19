@@ -683,7 +683,7 @@ const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
     healthCheck: true,
     modes: {
       relay: true,
-      backend: false
+      backend: false,
     },
     port: 10001,
     apiTimeout: 60000,
@@ -691,61 +691,82 @@ const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
     cors: true,
     globalAccessKey: "", // 移除敏感key
     compressThreshold: 5,
-    compressTarget: 2
+    compressTarget: 2,
   },
   providers: {
     Doubao: {
       enabled: true,
       text: { weight: 10 },
       edit: { model: "doubao-seedream-4-5-251128", size: "2048x2048", quality: "standard", n: 1 },
-      blend: { model: "doubao-seedream-4-5-251128", size: "1024x1024", quality: "standard", n: 1 }
+      blend: { model: "doubao-seedream-4-5-251128", size: "1024x1024", quality: "standard", n: 1 },
     },
     Gitee: {
       enabled: true,
       text: { weight: 10 },
       edit: { model: "Qwen-Image-Edit", size: "1024x1024", quality: "standard", n: 1 },
-      blend: { model: "Qwen-Image-Edit", size: "2048x2048", quality: "standard", n: 1 }
+      blend: { model: "Qwen-Image-Edit", size: "2048x2048", quality: "standard", n: 1 },
     },
     ModelScope: {
       enabled: true,
       text: { model: "Tongyi-MAI/Z-Image-Turbo", size: "1024x1024", quality: "standard", n: 2 },
       edit: { model: "Qwen/Qwen-Image-Edit", size: "1328x1328", quality: "standard", n: 1 },
-      blend: { model: "Qwen/Qwen-Image-Edit-2511", size: "1328x1328", quality: "standard", n: 1 }
+      blend: { model: "Qwen/Qwen-Image-Edit-2511", size: "1328x1328", quality: "standard", n: 1 },
     },
     HuggingFace: {
       enabled: true,
       text: { weight: 5 },
       edit: { model: "Qwen-Image-Edit-2511", size: "1024x1024", quality: "standard", n: 1 },
-      blend: { model: "z-image-turbo", size: "1024x1024", quality: "standard", n: 1 }
+      blend: { model: "z-image-turbo", size: "1024x1024", quality: "standard", n: 1 },
     },
     Pollinations: {
       enabled: true,
       text: { model: "zimage", size: "1024x1024", quality: "standard", n: 2 },
       edit: { model: "nanobanana-pro", size: "1024x1024", quality: "standard", n: 1 },
-      blend: { model: "kontext", size: "1024x1024", quality: "standard", n: 1 }
+      blend: { model: "kontext", size: "1024x1024", quality: "standard", n: 1 },
     },
     MockA: {
-      text: { model: "sdxl", weight: 100 }
+      text: { model: "sdxl", weight: 100 },
     },
     MockB: {
-      text: { model: "mj-v6", weight: 50 }
-    }
+      text: { model: "mj-v6", weight: 50 },
+    },
   },
   keyPools: {
     Doubao: [],
     HuggingFace: [],
-    Gitee: []
+    Gitee: [],
   },
   promptOptimizer: {
     baseUrl: "https://api.lianwusuoai.top/v1",
     apiKey: "", // 移除敏感key
     model: "翻译",
     enableTranslate: true,
-    translatePrompt: "I am a master AI image prompt engineering advisor, specializing in crafting prompts that yield cinematic, hyper-realistic, and deeply evocative visual narratives, optimized for advanced generative models.\\nMy core purpose is to meticulously rewrite, expand, and enhance user's image prompts.\\nI transform prompts to create visually stunning images by rigorously optimizing elements such as dramatic lighting, intricate textures, compelling composition, and a distinctive artistic style.\\nMy generated prompt output will be strictly under 300 words. Prior to outputting, I will internally validate that the refined prompt strictly adheres to the word count limit and effectively incorporates the intended stylistic and technical enhancements.\\nMy output will consist exclusively of the refined image prompt text. It will commence immediately, with no leading whitespace.\\nThe text will strictly avoid markdown, quotation marks, conversational preambles, explanations, or concluding remarks. Please describe the content using prose-style sentences.\\nThe character's face is clearly visible and unobstructed.",
+    translatePrompt:
+      "I am a master AI image prompt engineering advisor, specializing in crafting prompts that yield cinematic, hyper-realistic, and deeply evocative visual narratives, optimized for advanced generative models.\\nMy core purpose is to meticulously rewrite, expand, and enhance user's image prompts.\\nI transform prompts to create visually stunning images by rigorously optimizing elements such as dramatic lighting, intricate textures, compelling composition, and a distinctive artistic style.\\nMy generated prompt output will be strictly under 300 words. Prior to outputting, I will internally validate that the refined prompt strictly adheres to the word count limit and effectively incorporates the intended stylistic and technical enhancements.\\nMy output will consist exclusively of the refined image prompt text. It will commence immediately, with no leading whitespace.\\nThe text will strictly avoid markdown, quotation marks, conversational preambles, explanations, or concluding remarks. Please describe the content using prose-style sentences.\\nThe character's face is clearly visible and unobstructed.",
     enableExpand: true,
-    expandPrompt: "You are a professional language translation engine.\\nYour sole responsibility is to translate user-provided text into English. Before processing any input, you must first identify its original language.\\nIf the input text is already in English, return the original English text directly without any modification. If the input text is not in English, translate it precisely into English.\\nYour output must strictly adhere to the following requirements: it must contain only the final English translation or the original English text, without any explanations, comments, descriptions, prefixes, suffixes, quotation marks, or other non-translated content."
-  }
+    expandPrompt:
+      "You are a professional language translation engine.\\nYour sole responsibility is to translate user-provided text into English. Before processing any input, you must first identify its original language.\\nIf the input text is already in English, return the original English text directly without any modification. If the input text is not in English, translate it precisely into English.\\nYour output must strictly adhere to the following requirements: it must contain only the final English translation or the original English text, without any explanations, comments, descriptions, prefixes, suffixes, quotation marks, or other non-translated content.",
+  },
 };
+
+/**
+ * 获取应用版本号
+ * 从 deno.json 动态读取，确保 WebUI 显示真实版本
+ */
+export function getAppVersion(): string {
+  try {
+    const denoJsonPath = path.join(process.cwd(), "deno.json");
+    if (fs.existsSync(denoJsonPath)) {
+      const content = fs.readFileSync(denoJsonPath, "utf8");
+      const config = JSON.parse(content);
+      return config.version || "unknown";
+    }
+    return "unknown";
+  } catch (e) {
+    error("Config", `Failed to read version from deno.json: ${e}`);
+    return "unknown";
+  }
+}
 
 /**
  * 配置管理器类
@@ -827,7 +848,15 @@ class ConfigManager {
           };
         }
 
-        const allowedKeys = new Set(["model", "size", "quality", "n", "weight", "promptOptimizer", "steps"]);
+        const allowedKeys = new Set([
+          "model",
+          "size",
+          "quality",
+          "n",
+          "weight",
+          "promptOptimizer",
+          "steps",
+        ]);
         for (const k of Object.keys(v)) {
           if (!allowedKeys.has(k)) {
             changed = true;
@@ -990,6 +1019,30 @@ class ConfigManager {
     }
     if (this.runtimeConfig.system.modes) {
       this.config.modes = { ...this.config.modes, ...this.runtimeConfig.system.modes };
+    }
+    if (this.runtimeConfig.system.port !== undefined) {
+      this.config.server.port = this.runtimeConfig.system.port;
+    }
+    if (this.runtimeConfig.system.apiTimeout !== undefined) {
+      this.config.server.apiTimeoutMs = this.runtimeConfig.system.apiTimeout;
+    }
+    if (this.runtimeConfig.system.maxBodySize !== undefined) {
+      this.config.server.maxRequestBodySize = this.runtimeConfig.system.maxBodySize;
+    }
+    if (this.runtimeConfig.system.cors !== undefined) {
+      this.config.features.cors = this.runtimeConfig.system.cors;
+    }
+    if (this.runtimeConfig.system.requestLogging !== undefined) {
+      this.config.logging.request = this.runtimeConfig.system.requestLogging;
+    }
+    if (this.runtimeConfig.system.healthCheck !== undefined) {
+      this.config.features.healthCheck = this.runtimeConfig.system.healthCheck;
+    }
+    if (this.runtimeConfig.system.compressThreshold !== undefined) {
+      this.config.server.compress.threshold = this.runtimeConfig.system.compressThreshold;
+    }
+    if (this.runtimeConfig.system.compressTarget !== undefined) {
+      this.config.server.compress.target = this.runtimeConfig.system.compressTarget;
     }
 
     // 2. 应用提供商覆盖 (启用状态)

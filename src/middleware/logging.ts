@@ -151,7 +151,10 @@ export function withLogging(handler: Handler): (req: Request) => Promise<Respons
       const headers: Record<string, string> = {};
       req.headers.forEach((v, k) => {
         const lowerKey = k.toLowerCase();
-        if (lowerKey === "authorization" || lowerKey.includes("key") || lowerKey.includes("token") || lowerKey === "cookie") {
+        if (
+          lowerKey === "authorization" || lowerKey.includes("key") || lowerKey.includes("token") ||
+          lowerKey === "cookie"
+        ) {
           headers[k] = "******";
         } else {
           headers[k] = v;

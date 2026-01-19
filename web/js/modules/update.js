@@ -11,9 +11,9 @@ const CHECK_INTERVAL_MS = 3600 * 1000; // 1小时
  * @param {HTMLElement} container - 主内容容器
  */
 export async function renderUpdate(container) {
-    // 注入页面样式
-    const style = document.createElement("style");
-    style.textContent = `
+  // 注入页面样式
+  const style = document.createElement("style");
+  style.textContent = `
         .update-container {
             max-width: 800px;
             margin: 0 auto;
@@ -152,9 +152,9 @@ export async function renderUpdate(container) {
         }
         @keyframes spin { to { transform: rotate(360deg); } }
     `;
-    container.appendChild(style);
+  container.appendChild(style);
 
-    container.innerHTML += `
+  container.innerHTML += `
         <div class="update-container">
             <div class="version-card">
                 <div class="version-header">
@@ -193,143 +193,147 @@ export async function renderUpdate(container) {
         </div>
     `;
 
-    const checkBtn = container.querySelector("#btn-check-update");
-    const contentDiv = container.querySelector("#update-content");
-    const badge = container.querySelector("#badge-new-version");
+  const checkBtn = container.querySelector("#btn-check-update");
+  const contentDiv = container.querySelector("#update-content");
+  const badge = container.querySelector("#badge-new-version");
 
-    if (!checkBtn || !contentDiv) {
-        console.error("Required elements not found in update page");
-        return;
-    }
+  if (!checkBtn || !contentDiv) {
+    console.error("Required elements not found in update page");
+    return;
+  }
 
-    // 绑定点击事件
-    checkBtn.addEventListener("click", () => performCheck(true, contentDiv, checkBtn, badge));
+  // 绑定点击事件
+  checkBtn.addEventListener("click", () => performCheck(true, contentDiv, checkBtn, badge));
 
-    // 1. 立即加载本地版本信息（但不触发远程检查）
-    await loadLocalVersion(container);
+  // 1. 立即加载本地版本信息（但不触发远程检查）
+  await loadLocalVersion(container);
 
-    // 2. 启动自动检查定时器
-    startAutoCheckTimer(contentDiv, checkBtn, badge);
+  // 2. 启动自动检查定时器
+  startAutoCheckTimer(contentDiv, checkBtn, badge);
 }
 
 // 启动自动检查定时器
 function startAutoCheckTimer(contentDiv, checkBtn, badge) {
-    if (checkInterval) clearInterval(checkInterval);
-    
-    console.log("[AutoUpdate] 定时任务已启动，每小时检查一次");
-    checkInterval = setInterval(() => {
-        console.log("[AutoUpdate] 触发定时检查...");
-        performCheck(false, contentDiv, checkBtn, badge);
-    }, CHECK_INTERVAL_MS);
+  if (checkInterval) clearInterval(checkInterval);
+
+  console.log("[AutoUpdate] 定时任务已启动，每小时检查一次");
+  checkInterval = setInterval(() => {
+    console.log("[AutoUpdate] 触发定时检查...");
+    performCheck(false, contentDiv, checkBtn, badge);
+  }, CHECK_INTERVAL_MS);
 }
 
 // 加载本地版本
 async function loadLocalVersion(container) {
-    try {
-        const localRes = await apiFetch("/api/info");
-        if (localRes.ok) {
-            const localInfo = await localRes.json();
-            const localVersionRaw = (localInfo && localInfo.version) ? String(localInfo.version) : "0.0.0";
-            const displayEl = container.querySelector("#local-version-display");
-            if (displayEl) {
-                displayEl.innerHTML = `${formatVersionForDisplay(localVersionRaw)} <span class="badge badge-current">Local</span>`;
-            }
-            return localVersionRaw;
-        }
-    } catch (e) {
-        console.error("[Update] Failed to load local version:", e);
+  try {
+    const localRes = await apiFetch("/api/info");
+    if (localRes.ok) {
+      const localInfo = await localRes.json();
+      const localVersionRaw = (localInfo && localInfo.version)
+        ? String(localInfo.version)
+        : "0.0.0";
+      const displayEl = container.querySelector("#local-version-display");
+      if (displayEl) {
+        displayEl.innerHTML = `${
+          formatVersionForDisplay(localVersionRaw)
+        } <span class="badge badge-current">Local</span>`;
+      }
+      return localVersionRaw;
     }
-    return "0.0.0";
+  } catch (e) {
+    console.error("[Update] Failed to load local version:", e);
+  }
+  return "0.0.0";
 }
 
 // 执行检查
 // isManual: 是否为手动点击
 async function performCheck(isManual, contentDiv, checkBtn, badge) {
-    // 浏览器信息（自动通过 HTTP 头发送，此处仅做日志记录）
-    if (isManual) {
-        console.log("[Update] 开始手动检查...", navigator.userAgent);
-    } else {
-        console.log("[AutoUpdate] 开始自动检查...", navigator.userAgent);
-    }
+  // 浏览器信息（自动通过 HTTP 头发送，此处仅做日志记录）
+  if (isManual) {
+    console.log("[Update] 开始手动检查...", navigator.userAgent);
+  } else {
+    console.log("[AutoUpdate] 开始自动检查...", navigator.userAgent);
+  }
 
-    if (isManual) {
-        checkBtn.disabled = true;
-        checkBtn.innerHTML = '<i class="ri-loader-4-line status-spinner"></i> 检查中...';
-        // 手动检查时，显示加载动画
-        contentDiv.innerHTML = `
+  if (isManual) {
+    checkBtn.disabled = true;
+    checkBtn.innerHTML = '<i class="ri-loader-4-line status-spinner"></i> 检查中...';
+    // 手动检查时，显示加载动画
+    contentDiv.innerHTML = `
             <div class="loading-state">
                 <div class="loading-spinner"></div>
                 <span>正在检查版本信息...</span>
             </div>
         `;
+  }
+
+  try {
+    // 1. 获取本地版本
+    const localRes = await apiFetch("/api/info");
+    if (!localRes.ok) throw new Error(`本地版本信息获取失败: ${localRes.status}`);
+    const localInfo = await localRes.json();
+    const localVersionRaw = (localInfo && localInfo.version) ? String(localInfo.version) : "0.0.0";
+    const localVersion = normalizeVersion(localVersionRaw);
+
+    // 2. 获取 GitHub 最新版本
+    // 强制刷新：手动检查时强制刷新，自动检查时使用缓存
+    const url = isManual ? "/api/update/check?force=true" : "/api/update/check";
+    const response = await apiFetch(url);
+
+    if (!response.ok) {
+      let errorDetail = "";
+      try {
+        const errJson = await response.json();
+        // 处理限流
+        if (errJson.error === "rate_limit") {
+          throw new Error("GitHub API 访问受限 (403)。请稍后再试。");
+        }
+        errorDetail = errJson.message || errJson.error || response.statusText;
+      } catch (e) {
+        if (e.message.includes("GitHub API")) throw e;
+        errorDetail = response.statusText;
+      }
+      throw new Error(`GitHub API 请求失败: ${response.status} (${errorDetail})`);
     }
 
+    const release = await response.json();
+    const latestVersion = release.tag_name ? release.tag_name.replace(/^v/, "") : "0.0.0";
+    const latestVersionNorm = normalizeVersion(latestVersion);
+
+    // 3. 比较版本
+    let hasUpdate = false;
     try {
-        // 1. 获取本地版本
-        const localRes = await apiFetch("/api/info");
-        if (!localRes.ok) throw new Error(`本地版本信息获取失败: ${localRes.status}`);
-        const localInfo = await localRes.json();
-        const localVersionRaw = (localInfo && localInfo.version) ? String(localInfo.version) : "0.0.0";
-        const localVersion = normalizeVersion(localVersionRaw);
+      hasUpdate = compareVersions(latestVersionNorm, localVersion) > 0;
+    } catch (err) {
+      console.error("Version comparison failed:", err);
+    }
 
-        // 2. 获取 GitHub 最新版本
-        // 强制刷新：手动检查时强制刷新，自动检查时使用缓存
-        const url = isManual ? "/api/update/check?force=true" : "/api/update/check";
-        const response = await apiFetch(url);
+    // 成功获取，重置重试计数
+    retryCount = 0;
+    if (retryTimer) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
+    }
 
-        if (!response.ok) {
-            let errorDetail = "";
-            try {
-                const errJson = await response.json();
-                // 处理限流
-                if (errJson.error === "rate_limit") {
-                    throw new Error("GitHub API 访问受限 (403)。请稍后再试。");
-                }
-                errorDetail = errJson.message || errJson.error || response.statusText;
-            } catch (e) {
-                if (e.message.includes("GitHub API")) throw e;
-                errorDetail = response.statusText;
-            }
-            throw new Error(`GitHub API 请求失败: ${response.status} (${errorDetail})`);
-        }
+    // 更新新版本提示 Badge
+    if (hasUpdate && badge) {
+      badge.style.display = "inline-block";
+    } else if (badge) {
+      badge.style.display = "none";
+    }
 
-        const release = await response.json();
-        const latestVersion = release.tag_name ? release.tag_name.replace(/^v/, "") : "0.0.0";
-        const latestVersionNorm = normalizeVersion(latestVersion);
+    // 4. 渲染结果 (仅当手动检查 或 自动检查发现新版本且用户当前在页面上时更新)
+    // 为了简单起见，只要获取成功，我们就更新 UI，因为用户正在看这个区域
 
-        // 3. 比较版本
-        let hasUpdate = false;
-        try {
-            hasUpdate = compareVersions(latestVersionNorm, localVersion) > 0;
-        } catch (err) {
-            console.error("Version comparison failed:", err);
-        }
+    const releaseNotesHtml = await renderMarkdownToHtml(
+      release.body || "",
+      "lianwusuoai/img-router",
+    );
 
-        // 成功获取，重置重试计数
-        retryCount = 0;
-        if (retryTimer) {
-            clearTimeout(retryTimer);
-            retryTimer = null;
-        }
-
-        // 更新新版本提示 Badge
-        if (hasUpdate && badge) {
-            badge.style.display = "inline-block";
-        } else if (badge) {
-            badge.style.display = "none";
-        }
-
-        // 4. 渲染结果 (仅当手动检查 或 自动检查发现新版本且用户当前在页面上时更新)
-        // 为了简单起见，只要获取成功，我们就更新 UI，因为用户正在看这个区域
-        
-        const releaseNotesHtml = await renderMarkdownToHtml(
-            release.body || "",
-            "lianwusuoai/img-router",
-        );
-
-        let alertHtml = "";
-        if (hasUpdate) {
-            alertHtml = `
+    let alertHtml = "";
+    if (hasUpdate) {
+      alertHtml = `
                 <div class="alert-box alert-warning">
                     <i class="ri-notification-badge-line" style="font-size: 20px;"></i>
                     <div>
@@ -338,8 +342,8 @@ async function performCheck(isManual, contentDiv, checkBtn, badge) {
                     </div>
                 </div>
             `;
-        } else {
-            alertHtml = `
+    } else {
+      alertHtml = `
                 <div class="alert-box alert-success">
                     <i class="ri-checkbox-circle-line" style="font-size: 20px;"></i>
                     <div>
@@ -348,19 +352,23 @@ async function performCheck(isManual, contentDiv, checkBtn, badge) {
                     </div>
                 </div>
             `;
-        }
+    }
 
-        contentDiv.innerHTML = `
+    contentDiv.innerHTML = `
             ${alertHtml}
             
             <div class="version-status-row">
                 <div class="status-item">
                     <span class="status-label">当前版本</span>
-                    <span class="status-value">${formatVersionForDisplay(localVersionRaw)} <span class="badge badge-current">Local</span></span>
+                    <span class="status-value">${
+      formatVersionForDisplay(localVersionRaw)
+    } <span class="badge badge-current">Local</span></span>
                 </div>
                 <div class="status-item">
                     <span class="status-label">最新版本</span>
-                    <span class="status-value">${formatVersionForDisplay(latestVersionNorm)} <span class="badge badge-new">Latest</span></span>
+                    <span class="status-value">${
+      formatVersionForDisplay(latestVersionNorm)
+    } <span class="badge badge-new">Latest</span></span>
                 </div>
                 <div class="status-item">
                     <span class="status-label">发布时间</span>
@@ -378,15 +386,14 @@ async function performCheck(isManual, contentDiv, checkBtn, badge) {
             </div>
         `;
 
-        console.log(`[Update] Check success. Local: ${localVersion}, Latest: ${latestVersion}`);
+    console.log(`[Update] Check success. Local: ${localVersion}, Latest: ${latestVersion}`);
+  } catch (e) {
+    console.error("[Update] Check failed:", e);
 
-    } catch (e) {
-        console.error("[Update] Check failed:", e);
-        
-        // 错误处理策略
-        if (isManual) {
-            // 手动模式：直接显示错误并允许重试
-            contentDiv.innerHTML = `
+    // 错误处理策略
+    if (isManual) {
+      // 手动模式：直接显示错误并允许重试
+      contentDiv.innerHTML = `
                 <div class="alert-box alert-warning">
                     <i class="ri-error-warning-line"></i>
                     <div>
@@ -400,48 +407,52 @@ async function performCheck(isManual, contentDiv, checkBtn, badge) {
                     </button>
                 </div>
             `;
-            const retryBtn = contentDiv.querySelector("#btn-retry");
-            if(retryBtn) retryBtn.onclick = () => performCheck(true, contentDiv, checkBtn, badge);
-        } else {
-            // 自动模式：指数退避重试
-            scheduleRetry(contentDiv, checkBtn, badge);
-        }
-    } finally {
-        if (isManual) {
-            checkBtn.disabled = false;
-            checkBtn.innerHTML = `
-                <i class="ri-refresh-line"></i> 检查更新
-                <span id="badge-new-version-inner" class="badge-update-available" style="display: ${badge && badge.style.display === 'inline-block' ? 'inline-block' : 'none'}">NEW</span>
-            `;
-            // 重新绑定 badge 引用，因为 innerHTML 重置了 button 内容
-            // 其实这里 button 内容重置会导致 badge 元素丢失，需要重新处理
-            // 更好的做法是只修改 icon 和 text，保留 badge 元素
-            // 但为了简单，我们重新插入 badge 的 HTML
-        }
+      const retryBtn = contentDiv.querySelector("#btn-retry");
+      if (retryBtn) retryBtn.onclick = () => performCheck(true, contentDiv, checkBtn, badge);
+    } else {
+      // 自动模式：指数退避重试
+      scheduleRetry(contentDiv, checkBtn, badge);
     }
+  } finally {
+    if (isManual) {
+      checkBtn.disabled = false;
+      checkBtn.innerHTML = `
+                <i class="ri-refresh-line"></i> 检查更新
+                <span id="badge-new-version-inner" class="badge-update-available" style="display: ${
+        badge && badge.style.display === "inline-block" ? "inline-block" : "none"
+      }">NEW</span>
+            `;
+      // 重新绑定 badge 引用，因为 innerHTML 重置了 button 内容
+      // 其实这里 button 内容重置会导致 badge 元素丢失，需要重新处理
+      // 更好的做法是只修改 icon 和 text，保留 badge 元素
+      // 但为了简单，我们重新插入 badge 的 HTML
+    }
+  }
 }
 
 // 简单的“一次快速重试”策略
 function scheduleRetry(contentDiv, checkBtn, badge) {
-    // 策略：失败后仅重试一次（1分钟后）。
-    // 如果重试依然失败，则不再继续重试，而是等待下一次每小时的定时检查。
-    // 这样可以避免因持续失败导致的 429 限流问题。
-    
-    if (retryCount >= 1) {
-        console.info("[AutoUpdate] Fast retry failed. Giving up and waiting for next scheduled hourly check.");
-        retryCount = 0; // 重置计数，确保下一次定时检查如果失败，仍能触发一次快速重试
-        return;
-    }
+  // 策略：失败后仅重试一次（1分钟后）。
+  // 如果重试依然失败，则不再继续重试，而是等待下一次每小时的定时检查。
+  // 这样可以避免因持续失败导致的 429 限流问题。
 
-    retryCount++;
-    const delay = 60 * 1000; // 固定 1 分钟
-    
-    console.log(`[AutoUpdate] Check failed. Retrying once in ${delay/1000} seconds.`);
-    
-    if (retryTimer) clearTimeout(retryTimer);
-    retryTimer = setTimeout(() => {
-        performCheck(false, contentDiv, checkBtn, badge);
-    }, delay);
+  if (retryCount >= 1) {
+    console.info(
+      "[AutoUpdate] Fast retry failed. Giving up and waiting for next scheduled hourly check.",
+    );
+    retryCount = 0; // 重置计数，确保下一次定时检查如果失败，仍能触发一次快速重试
+    return;
+  }
+
+  retryCount++;
+  const delay = 60 * 1000; // 固定 1 分钟
+
+  console.log(`[AutoUpdate] Check failed. Retrying once in ${delay / 1000} seconds.`);
+
+  if (retryTimer) clearTimeout(retryTimer);
+  retryTimer = setTimeout(() => {
+    performCheck(false, contentDiv, checkBtn, badge);
+  }, delay);
 }
 
 function formatVersionForDisplay(version) {

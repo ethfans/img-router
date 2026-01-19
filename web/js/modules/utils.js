@@ -18,9 +18,6 @@ export const providerMeta = {
   "Pollinations": { icon: "ri-plant-line", color: "#4caf50", desc: "免费开源生成" },
 };
 
-// 获取本地存储的 Auth Token (如果有)
-const authToken = localStorage.getItem("authToken") || "";
-
 /**
  * 封装的 fetch 请求
  *
@@ -31,6 +28,7 @@ const authToken = localStorage.getItem("authToken") || "";
  * @returns {Promise<Response>} fetch 响应对象
  */
 export async function apiFetch(url, options = {}) {
+  const authToken = localStorage.getItem("authToken") || "";
   if (authToken) {
     options.headers = {
       ...options.headers,

@@ -377,7 +377,9 @@ function renderAllChannels(providers) {
                     <div class="channel-cell">${
       buildCountSelect(provider, textDefaults.n, "text")
     }</div>
-                    <div class="channel-cell">${buildStepsInput(provider, textDefaults.steps, "text")}</div>
+                    <div class="channel-cell">${
+      buildStepsInput(provider, textDefaults.steps, "text")
+    }</div>
                 </div>
                 <div class="channel-row">
                     <div class="channel-cell">${
@@ -402,7 +404,9 @@ function renderAllChannels(providers) {
                     <div class="channel-cell">${
       buildCountSelect(provider, editDefaults.n, "edit")
     }</div>
-                    <div class="channel-cell">${buildStepsInput(provider, editDefaults.steps, "edit")}</div>
+                    <div class="channel-cell">${
+      buildStepsInput(provider, editDefaults.steps, "edit")
+    }</div>
                 </div>
                 <div class="channel-row">
                     <div class="channel-cell">${
@@ -428,7 +432,9 @@ function renderAllChannels(providers) {
                     <div class="channel-cell">${
       buildCountSelect(provider, blendDefaults.n, "blend")
     }</div>
-                    <div class="channel-cell">${buildStepsInput(provider, blendDefaults.steps, "blend")}</div>
+                    <div class="channel-cell">${
+      buildStepsInput(provider, blendDefaults.steps, "blend")
+    }</div>
                 </div>
             </div>
         `;

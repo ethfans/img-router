@@ -9,8 +9,9 @@
  * 4. 服务启动：启动 HTTP 服务器并监听指定端口。
  */
 
-import { handleRequest } from "./app.ts";
+import { cleanupOldContainers, handleRequest } from "./app.ts";
 import {
+  getAppVersion,
   getRuntimeConfig,
   getSystemConfig,
   LOG_LEVEL,
@@ -21,24 +22,6 @@ import {
 import { closeLogger, configureLogger, info, initLogger, LogLevel } from "./core/logger.ts";
 import { providerRegistry } from "./providers/registry.ts";
 import type { ProviderName } from "./providers/base.ts";
-
-/**
- * 获取应用版本号
- *
- * 从 deno.json 文件中读取版本信息。
- * 如果读取失败，返回 "unknown"。
- *
- * @returns Promise<string> 版本号字符串
- */
-async function getVersion(): Promise<string> {
-  try {
-    const denoJson = await Deno.readTextFile("./deno.json");
-    const config = JSON.parse(denoJson);
-    return config.version || "unknown";
-  } catch {
-    return "unknown";
-  }
-}
 
 // ==========================================
 // 1. 初始化阶段
@@ -71,12 +54,20 @@ if (logLevel && logLevel in LogLevel) {
 
 const systemConfig: SystemConfig = getSystemConfig();
 
+if (Deno.build.os !== "windows") {
+  try {
+    await cleanupOldContainers();
+  } catch (e) {
+    void e;
+  }
+}
+
 // ==========================================
 // 2. 启动信息输出
 // ==========================================
 
 // 读取版本号并输出启动 Banner 信息
-const version = await getVersion();
+const version = getAppVersion();
 info("Startup", `🚀 服务启动端口 ${PORT}`);
 if (systemConfig.globalAccessKey) {
   info("Startup", "🔒 已启用统一访问密钥保护");

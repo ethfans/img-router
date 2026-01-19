@@ -37,7 +37,10 @@ export async function renderSetting(container) {
                 <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 16px;">
                     <div class="form-group" style="margin-bottom: 0;">
                         <label class="form-label">服务端口 <span class="badge" style="font-size:10px; margin-left:4px;">重启生效</span></label>
-                        <input type="number" id="port" class="form-control" placeholder="10001">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <input type="number" id="port" class="form-control" placeholder="10001" style="flex: 1;">
+                            <button class="btn btn-primary" id="restartDockerBtn" type="button" style="padding: 10px 14px; white-space: nowrap;">重启Docker</button>
+                        </div>
                     </div>
                     <div class="form-group" style="margin-bottom: 0;">
                         <label class="form-label">API 超时 (秒)</label>
@@ -215,6 +218,105 @@ export async function renderSetting(container) {
 
   // 加载当前设置
   await loadSystemSettings();
+
+  const restartBtn = document.getElementById("restartDockerBtn");
+  if (restartBtn) {
+    restartBtn.addEventListener("click", restartDocker);
+  }
+}
+
+async function restartDocker() {
+  const confirmed = globalThis.confirm(
+    "将执行 docker compose up -d 以应用端口配置，可能短暂中断服务。是否继续？",
+  );
+  if (!confirmed) return;
+
+  const btn = document.getElementById("restartDockerBtn");
+  const originalText = btn ? btn.textContent : "";
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "重启中...";
+  }
+
+  const portEl = document.getElementById("port");
+  const nextPort = portEl && "value" in portEl ? Number.parseInt(String(portEl.value), 10) : NaN;
+  const targetUrl = Number.isFinite(nextPort) && nextPort > 0
+    ? (() => {
+      const url = new URL(globalThis.location.href);
+      url.port = String(nextPort);
+      url.pathname = "/setting";
+      url.search = "";
+      url.hash = "";
+      return url.toString();
+    })()
+    : "";
+
+  const targetPingUrl = targetUrl
+    ? (() => {
+      const url = new URL(targetUrl);
+      url.pathname = "/api/info";
+      url.search = `t=${Date.now()}`;
+      return url.toString();
+    })()
+    : "";
+
+  const controller = new AbortController();
+  const timeoutMs = 30_000;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await apiFetch("/api/restart-docker", {
+      method: "POST",
+      signal: controller.signal,
+    });
+    const text = await res.text();
+    let data = {};
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = {};
+    }
+    if (!res.ok) {
+      const msg = data && data.error ? data.error : (text || "重启失败");
+      throw new Error(msg);
+    }
+    if (targetUrl) {
+      const waitMs = 60_000;
+      const start = Date.now();
+      while (Date.now() - start < waitMs) {
+        try {
+          const pingUrl = (() => {
+            const u = new URL(targetPingUrl);
+            u.searchParams.set("t", String(Date.now()));
+            return u.toString();
+          })();
+          await fetch(pingUrl, { cache: "no-store", mode: "no-cors" });
+          break;
+        } catch (e) {
+          void e;
+        }
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+
+      globalThis.location.href = targetUrl;
+      return;
+    }
+    globalThis.alert(
+      "已触发重启。端口映射将在容器重建后生效。\n\n如果页面短暂无法访问，请稍等几秒刷新。",
+    );
+  } catch (e) {
+    const isAbort = typeof e === "object" && e !== null && "name" in e && e.name === "AbortError";
+    const msg = e instanceof Error ? e.message : String(e);
+    globalThis.alert(
+      isAbort ? "重启请求超时：后端未及时响应。请稍等片刻刷新页面确认状态。" : `重启失败：${msg}`,
+    );
+  } finally {
+    clearTimeout(timer);
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = originalText || "重启Docker";
+    }
+  }
 }
 
 /**
@@ -254,6 +356,15 @@ async function loadSystemSettings() {
     setCheck("modeBackend", modes.backend);
     setVal("globalAccessKey", runtimeSystem.globalAccessKey);
 
+    const token = typeof runtimeSystem.globalAccessKey === "string"
+      ? runtimeSystem.globalAccessKey
+      : "";
+    if (token) {
+      localStorage.setItem("authToken", token);
+    } else {
+      localStorage.removeItem("authToken");
+    }
+
     // 图片压缩设置 (从 runtimeConfig 读取)
     setVal("compressThreshold", runtimeSystem.compressThreshold || 5);
     setVal("compressTarget", runtimeSystem.compressTarget || 2);
@@ -281,7 +392,7 @@ function updateSaveStatus(status) {
     el.style.color = "var(--success-color, #10b981)";
     if (dot) dot.style.background = "var(--success)";
     if (text) text.innerText = "运行中";
-    
+
     // 2秒后淡出
     setTimeout(() => {
       if (el.innerHTML.includes("已保存")) {
@@ -307,7 +418,7 @@ function updateSaveStatus(status) {
  */
 function triggerSave(immediate = false) {
   updateSaveStatus("unsaved");
-  
+
   if (saveTimer) {
     clearTimeout(saveTimer);
     saveTimer = null;
@@ -337,16 +448,16 @@ async function saveSystemSettings() {
 
   try {
     const getVal = (id) => {
-        const el = document.getElementById(id);
-        return el ? el.value : "";
+      const el = document.getElementById(id);
+      return el ? el.value : "";
     };
     const getNum = (id) => {
-        const el = document.getElementById(id);
-        return el ? Number(el.value) : 0;
+      const el = document.getElementById(id);
+      return el ? Number(el.value) : 0;
     };
     const getCheck = (id) => {
-        const el = document.getElementById(id);
-        return el ? el.checked : false;
+      const el = document.getElementById(id);
+      return el ? el.checked : false;
     };
 
     const systemConfig = {
@@ -379,14 +490,14 @@ async function saveSystemSettings() {
     let s3Config = undefined;
     const s3Endpoint = document.getElementById("s3Endpoint");
     if (s3Endpoint) {
-        s3Config = {
-            endpoint: getVal("s3Endpoint"),
-            region: getVal("s3Region"),
-            bucket: getVal("s3Bucket"),
-            accessKey: getVal("s3AccessKey"),
-            secretKey: getVal("s3SecretKey"),
-            publicUrl: getVal("s3PublicUrl"),
-        };
+      s3Config = {
+        endpoint: getVal("s3Endpoint"),
+        region: getVal("s3Region"),
+        bucket: getVal("s3Bucket"),
+        accessKey: getVal("s3AccessKey"),
+        secretKey: getVal("s3SecretKey"),
+        publicUrl: getVal("s3PublicUrl"),
+      };
     }
 
     const payload = {
@@ -402,19 +513,26 @@ async function saveSystemSettings() {
     });
 
     if (res.ok) {
-        updateSaveStatus("saved");
+      const token = typeof systemConfig.globalAccessKey === "string"
+        ? systemConfig.globalAccessKey
+        : "";
+      if (token) {
+        localStorage.setItem("authToken", token);
+      } else {
+        localStorage.removeItem("authToken");
+      }
+      updateSaveStatus("saved");
     } else {
-        throw new Error("Save failed");
+      throw new Error("Save failed");
     }
-
   } catch (e) {
     console.error(e);
     updateSaveStatus("error");
   } finally {
     saveInFlight = false;
     if (pendingSave) {
-        pendingSave = false;
-        triggerSave(true);
+      pendingSave = false;
+      triggerSave(true);
     }
   }
 }

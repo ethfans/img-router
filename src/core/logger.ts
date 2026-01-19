@@ -307,7 +307,7 @@ async function rotateLogFileIfNeeded(): Promise<void> {
     const logPath = `${config.logDir}/${today}.log`;
     try {
       logFile = await Deno.open(logPath, { create: true, append: true });
-      
+
       // 如果是新的一天，启动新的监听
       startFileWatcher(logPath);
     } catch (e) {
@@ -337,7 +337,7 @@ async function flushQueue() {
         }
       } else {
         // 如果文件未启用或无法打开，清空队列防止内存溢出
-        logQueue.length = 0; 
+        logQueue.length = 0;
       }
     }
   } catch (e) {
@@ -360,7 +360,7 @@ async function flushQueue() {
  */
 function writeLog(level: number, module: string, message: string): void {
   const timestamp = getBeijingTimestamp();
-  
+
   // 修正 LogLevel 枚举映射：
   // DEBUG=0 -> DEBUG
   // INFO=1 -> INFO
@@ -369,7 +369,6 @@ function writeLog(level: number, module: string, message: string): void {
   if (level === LogLevel.DEBUG) actualLevelName = "DEBUG";
   else if (level === LogLevel.ERROR) actualLevelName = "ERROR";
   else actualLevelName = "INFO";
-
 
   // 仅当级别满足配置要求时才处理
   if (level < config.level) {
@@ -390,7 +389,9 @@ function writeLog(level: number, module: string, message: string): void {
 
   // 控制台输出（仅当级别满足配置要求时）
   if (level >= config.level) {
-    const color = level === LogLevel.ERROR ? "\x1b[31m" : (level === LogLevel.DEBUG ? "\x1b[34m" : "\x1b[32m");
+    const color = level === LogLevel.ERROR
+      ? "\x1b[31m"
+      : (level === LogLevel.DEBUG ? "\x1b[34m" : "\x1b[32m");
     const reset = "\x1b[0m";
     console.log(`${color}[${timestamp}] [${actualLevelName}] [${module}] ${message}${reset}`);
   }
@@ -464,7 +465,7 @@ export async function initLogger(): Promise<void> {
     logFile = await Deno.open(logPath, { create: true, append: true });
     const encoder = new TextEncoder();
     const sep = "\n" + "=".repeat(50) + "\n";
-    
+
     // 使用队列写入启动信息
     logQueue.push(encoder.encode(`${sep}[${getBeijingTimestamp()}] 启动${sep}`));
     flushQueue();
@@ -491,8 +492,8 @@ export async function closeLogger(): Promise<void> {
   }
 
   // 等待队列清空
-  while(logQueue.length > 0) {
-    await new Promise(r => setTimeout(r, 10));
+  while (logQueue.length > 0) {
+    await new Promise((r) => setTimeout(r, 10));
   }
 
   if (logFile) {
@@ -554,7 +555,9 @@ export function logRequestEnd(
   errorMessage?: string,
 ): void {
   if (errorMessage || status >= 400) {
-    const msg = `${method} ${url} ${status} 失败 (${duration}ms) [${requestId}]: ${errorMessage || "未知错误"}`;
+    const msg = `${method} ${url} ${status} 失败 (${duration}ms) [${requestId}]: ${
+      errorMessage || "未知错误"
+    }`;
     writeLog(LogLevel.ERROR, "HTTP", msg);
   } else {
     // 彻底屏蔽高频/低价值请求的成功日志（如管理后台页面导航和配置轮询）
