@@ -150,7 +150,14 @@ export function withLogging(handler: Handler): (req: Request) => Promise<Respons
     // 如果启用了详细日志模式，记录请求头信息以便调试
     if (Config.ENABLE_REQUEST_LOGGING && Config.VERBOSE_LOGGING) {
       const headers: Record<string, string> = {};
-      req.headers.forEach((v, k) => headers[k] = v);
+      req.headers.forEach((v, k) => {
+        const lowerKey = k.toLowerCase();
+        if (lowerKey === "authorization" || lowerKey.includes("key") || lowerKey.includes("token") || lowerKey === "cookie") {
+          headers[k] = "******";
+        } else {
+          headers[k] = v;
+        }
+      });
       debug(MODULE, `Request Headers (${req.method} ${req.url}): ${JSON.stringify(headers)}`);
     }
 

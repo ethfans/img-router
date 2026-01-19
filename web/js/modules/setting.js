@@ -5,7 +5,11 @@
  * 支持自动保存功能。
  */
 
-import { apiFetch, debounce } from "./utils.js";
+import { apiFetch } from "./utils.js";
+
+let saveTimer = null;
+let saveInFlight = false;
+let pendingSave = false;
 
 /**
  * 渲染设置页面
@@ -17,6 +21,15 @@ export async function renderSetting(container) {
         <div class="card">
             <div class="card-header">
                 <h3 class="card-title">基础设置</h3>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <div id="settingSaveStatus" style="font-size: 12px; color: var(--text-secondary); opacity: 0; transition: opacity 0.3s;">
+                        <i class="ri-check-line"></i> 已保存
+                    </div>
+                    <div class="status-pill">
+                        <span class="status-dot"></span>
+                        <span>运行中</span>
+                    </div>
+                </div>
             </div>
             
             <div class="form-section" style="padding: 16px;">
@@ -189,8 +202,15 @@ export async function renderSetting(container) {
   // 事件监听：自动保存
   const inputs = container.querySelectorAll("input");
   inputs.forEach((input) => {
-    input.addEventListener("change", debounceSave);
-    input.addEventListener("input", debounceSave);
+    if (input.type === "checkbox") {
+      // 开关类控件：立即保存
+      input.addEventListener("change", () => triggerSave(true));
+    } else {
+      // 输入框：输入时防抖保存，失去焦点或回车立即保存
+      input.addEventListener("input", () => triggerSave(false));
+      input.addEventListener("change", () => triggerSave(true));
+      input.addEventListener("blur", () => triggerSave(true));
+    }
   });
 
   // 加载当前设置
@@ -206,14 +226,23 @@ async function loadSystemSettings() {
     if (!res.ok) return;
     const config = await res.json();
 
-    // 基础设置
-    document.getElementById("port").value = config.port;
-    document.getElementById("timeout").value = config.timeout / 1000;
-    document.getElementById("maxBody").value = config.maxBody / 1024 / 1024;
+    const setVal = (id, val) => {
+      const el = document.getElementById(id);
+      if (el) el.value = val !== undefined ? val : "";
+    };
+    const setCheck = (id, val) => {
+      const el = document.getElementById(id);
+      if (el) el.checked = !!val;
+    };
 
-    document.getElementById("cors").checked = config.cors;
-    document.getElementById("logging").checked = config.logging;
-    document.getElementById("health").checked = config.healthCheck;
+    // 基础设置
+    setVal("port", config.port);
+    setVal("timeout", config.timeout / 1000);
+    setVal("maxBody", config.maxBody / 1024 / 1024);
+
+    setCheck("cors", config.cors);
+    setCheck("logging", config.logging);
+    setCheck("health", config.healthCheck);
 
     // 运行模式
     const runtimeSystem = (config.runtimeConfig && config.runtimeConfig.system)
@@ -221,109 +250,171 @@ async function loadSystemSettings() {
       : {};
     const modes = runtimeSystem.modes || { relay: true, backend: false };
 
-    document.getElementById("modeRelay").checked = modes.relay;
-    document.getElementById("modeBackend").checked = modes.backend;
-    document.getElementById("globalAccessKey").value = runtimeSystem.globalAccessKey || "";
+    setCheck("modeRelay", modes.relay);
+    setCheck("modeBackend", modes.backend);
+    setVal("globalAccessKey", runtimeSystem.globalAccessKey);
 
     // 图片压缩设置 (从 runtimeConfig 读取)
-    document.getElementById("compressThreshold").value = runtimeSystem.compressThreshold || 5;
-    document.getElementById("compressTarget").value = runtimeSystem.compressTarget || 2;
+    setVal("compressThreshold", runtimeSystem.compressThreshold || 5);
+    setVal("compressTarget", runtimeSystem.compressTarget || 2);
   } catch (e) {
     console.error("Failed to load settings:", e);
   }
 }
 
+function updateSaveStatus(status) {
+  const el = document.getElementById("settingSaveStatus");
+  const dot = document.querySelector(".status-dot");
+  const text = document.querySelector(".status-pill span");
+
+  if (!el) return;
+
+  if (status === "saving") {
+    el.innerHTML = '<i class="ri-loader-4-line ri-spin"></i> 保存中...';
+    el.style.opacity = "1";
+    el.style.color = "var(--text-secondary)";
+    if (dot) dot.style.background = "#ffd700";
+    if (text) text.innerText = "保存中...";
+  } else if (status === "saved") {
+    el.innerHTML = '<i class="ri-check-line"></i> 已保存';
+    el.style.opacity = "1";
+    el.style.color = "var(--success-color, #10b981)";
+    if (dot) dot.style.background = "var(--success)";
+    if (text) text.innerText = "运行中";
+    
+    // 2秒后淡出
+    setTimeout(() => {
+      if (el.innerHTML.includes("已保存")) {
+        el.style.opacity = "0";
+      }
+    }, 2000);
+  } else if (status === "error") {
+    el.innerHTML = '<i class="ri-error-warning-line"></i> 保存失败';
+    el.style.opacity = "1";
+    el.style.color = "var(--error-color, #ef4444)";
+    if (dot) dot.style.background = "var(--error)";
+    if (text) text.innerText = "保存失败";
+  } else if (status === "unsaved") {
+    el.innerHTML = '<i class="ri-edit-circle-line"></i> 未保存';
+    el.style.opacity = "1";
+    el.style.color = "var(--warning-color, #f59e0b)";
+  }
+}
+
 /**
- * 防抖保存函数
+ * 触发保存
+ * @param {boolean} immediate - 是否立即保存
  */
-const debounceSave = debounce(async () => {
-  await saveSystemSettings();
-}, 1000);
+function triggerSave(immediate = false) {
+  updateSaveStatus("unsaved");
+  
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+
+  if (immediate) {
+    saveSystemSettings();
+  } else {
+    saveTimer = setTimeout(() => {
+      saveSystemSettings();
+      saveTimer = null;
+    }, 500); // 500ms 防抖
+  }
+}
 
 /**
  * 保存系统配置到后端
  */
 async function saveSystemSettings() {
-  const statusDot = document.querySelector(".status-dot");
-  const statusText = document.querySelector(".status-pill span");
-  if (statusDot) {
-    statusDot.style.background = "#ffd700";
-    if (statusText) statusText.innerText = "保存中...";
+  if (saveInFlight) {
+    pendingSave = true;
+    return;
   }
 
+  saveInFlight = true;
+  updateSaveStatus("saving");
+
   try {
+    const getVal = (id) => {
+        const el = document.getElementById(id);
+        return el ? el.value : "";
+    };
+    const getNum = (id) => {
+        const el = document.getElementById(id);
+        return el ? Number(el.value) : 0;
+    };
+    const getCheck = (id) => {
+        const el = document.getElementById(id);
+        return el ? el.checked : false;
+    };
+
     const systemConfig = {
       // 基础设置
-      port: Number(document.getElementById("port").value),
-      apiTimeout: Number(document.getElementById("timeout").value) * 1000, // 转换为毫秒
-      maxBodySize: Number(document.getElementById("maxBody").value) * 1024 * 1024, // 转换为字节
+      port: getNum("port"),
+      apiTimeout: getNum("timeout") * 1000, // 转换为毫秒
+      maxBodySize: getNum("maxBody") * 1024 * 1024, // 转换为字节
 
       // 功能开关
-      cors: document.getElementById("cors").checked,
-      requestLogging: document.getElementById("logging").checked,
-      healthCheck: document.getElementById("health").checked,
+      cors: getCheck("cors"),
+      requestLogging: getCheck("logging"),
+      healthCheck: getCheck("health"),
 
       modes: {
-        relay: document.getElementById("modeRelay").checked,
-        backend: document.getElementById("modeBackend").checked,
+        relay: getCheck("modeRelay"),
+        backend: getCheck("modeBackend"),
       },
-      globalAccessKey: document.getElementById("globalAccessKey").value,
-      // 图片压缩配置 (扁平化存储以匹配后端 SystemConfig)
-      compressThreshold: Number(document.getElementById("compressThreshold").value),
-      compressTarget: Number(document.getElementById("compressTarget").value),
+      globalAccessKey: getVal("globalAccessKey"),
+      // 图片压缩配置
+      compressThreshold: getNum("compressThreshold"),
+      compressTarget: getNum("compressTarget"),
 
       // 功能特性
       features: {
-        autoConvertWebP: document.getElementById("autoConvertWebP").checked,
+        autoConvertWebP: getCheck("autoConvertWebP"),
       },
     };
 
-    // 构建 S3 配置
-    const s3Config = {
-      endpoint: document.getElementById("s3Endpoint").value,
-      region: document.getElementById("s3Region").value,
-      bucket: document.getElementById("s3Bucket").value,
-      accessKey: document.getElementById("s3AccessKey").value,
-      secretKey: document.getElementById("s3SecretKey").value,
-      publicUrl: document.getElementById("s3PublicUrl").value,
-    };
+    // 构建 S3 配置 (仅当存在对应 DOM 时获取)
+    let s3Config = undefined;
+    const s3Endpoint = document.getElementById("s3Endpoint");
+    if (s3Endpoint) {
+        s3Config = {
+            endpoint: getVal("s3Endpoint"),
+            region: getVal("s3Region"),
+            bucket: getVal("s3Bucket"),
+            accessKey: getVal("s3AccessKey"),
+            secretKey: getVal("s3SecretKey"),
+            publicUrl: getVal("s3PublicUrl"),
+        };
+    }
 
-    // 如果 S3 关键字段不为空，则更新 storage 配置
-    // 注意：这里需要确保后端支持接收 storage 字段的更新，目前 /api/runtime-config 接收 { system: ... }
-    // 我们需要调整后端 app.ts 或者在此处构造正确的 payload
-    // 查看 app.ts，/api/runtime-config 接收 { system, providers }
-    // 我们需要把 storage 放入 payload 的顶层（如果后端支持）或者 system 中？
-    // 检查 app.ts，runtimeConfig 结构是 { system, providers, keyPools, storage }
-    // app.ts 的 POST 处理逻辑:
-    // const nextConfig = { ...current.providers, ...current.system, ... }
-    // 它只处理了 system 和 providers 的 patch
-    // 我们需要修改 app.ts 来支持 storage 的更新
-
-    // 这里先构造 payload，稍后（或同时）去修改 app.ts
     const payload = {
       system: systemConfig,
-      storage: {
-        s3: s3Config.endpoint ? s3Config : undefined,
-      },
+      storage: s3Config ? { s3: s3Config } : undefined,
     };
 
     // 发送运行时配置更新
-    await apiFetch("/api/runtime-config", {
+    const res = await apiFetch("/api/runtime-config", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
 
-    if (statusDot) {
-      statusDot.style.background = "var(--success)";
-      if (statusText) statusText.innerText = "已保存";
-      setTimeout(() => {
-        if (statusText) statusText.innerText = "运行中";
-      }, 2000);
+    if (res.ok) {
+        updateSaveStatus("saved");
+    } else {
+        throw new Error("Save failed");
     }
+
   } catch (e) {
     console.error(e);
-    if (statusDot) statusDot.style.background = "var(--error)";
-    if (statusText) statusText.innerText = "保存失败";
+    updateSaveStatus("error");
+  } finally {
+    saveInFlight = false;
+    if (pendingSave) {
+        pendingSave = false;
+        triggerSave(true);
+    }
   }
 }

@@ -11,7 +11,6 @@ import { renderChannel } from "./channel.js";
 // import { renderModelMap } from "./model_map.js";
 import { renderKeys } from "./keys.js";
 import { renderGallery } from "./gallery.js";
-import { renderUpdate } from "./update.js";
 
 /**
  * 路由配置表
@@ -32,7 +31,13 @@ const routes = {
       await renderPromptOptimizer(container);
     },
   },
-  "/update": { title: "检查更新", render: renderUpdate },
+  "/update": {
+    title: "检查更新",
+    render: async (container) => {
+      const { renderUpdate } = await import("./update.js");
+      await renderUpdate(container);
+    },
+  },
 };
 
 /**
@@ -46,7 +51,9 @@ export function initRouter() {
   // 拦截点击事件以处理路由跳转
   // 代理所有带有 data-link 属性的 <a> 标签
   document.addEventListener("click", (e) => {
-    const link = e.target.closest("a[data-link]");
+    const target = e.target;
+    if (!(target instanceof Element)) return;
+    const link = target.closest("a[data-link]");
     if (link) {
       e.preventDefault();
       navigateTo(link.getAttribute("href"));
@@ -110,8 +117,19 @@ async function handleLocation() {
 
     // 清空旧内容
     mainContent.innerHTML = "";
-    // 调用新页面的渲染函数
-    await route.render(mainContent);
+    try {
+      await route.render(mainContent);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.error("Route render failed:", e);
+      mainContent.innerHTML = `
+        <div class="card" style="margin: 16px; padding: 16px; border: 1px solid var(--border-color);">
+          <div style="font-weight: 600; margin-bottom: 8px; color: var(--text-primary);">页面渲染失败</div>
+          <div style="color: var(--text-secondary); font-size: 13px; line-height: 1.6;">${message}</div>
+          <div style="margin-top: 12px; color: var(--text-secondary); font-size: 12px;">建议：按 Ctrl + F5 强制刷新；或在浏览器控制台查看详细错误。</div>
+        </div>
+      `;
+    }
   }
 }
 

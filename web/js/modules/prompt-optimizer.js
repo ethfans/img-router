@@ -412,7 +412,7 @@ function debouncedSave(_container) {
   saveTimer = setTimeout(() => {
     savePromptOptimizerConfig();
     saveTimer = null;
-  }, 100); // 缩短到 100ms
+  }, 500); // 500ms 防抖
 }
 
 let saveInFlight = false;

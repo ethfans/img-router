@@ -93,7 +93,7 @@ async function handleUpdateCheck(req: Request): Promise<Response> {
   try {
     const res = await fetch("https://api.github.com/repos/lianwusuoai/img-router/releases/latest", {
       headers: {
-        "User-Agent": "img-router/1.0",
+        "User-Agent": req.headers.get("User-Agent") || "img-router/1.0",
         "Accept": "application/vnd.github.v3+json",
       },
     });
@@ -294,7 +294,10 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
     try {
       const html = await Deno.readTextFile("web/index.html");
       return new Response(html, {
-        headers: { "Content-Type": "text/html; charset=utf-8" },
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "no-store, max-age=0",
+        },
       });
     } catch (e) {
       warn("HTTP", `无法加载设置页面: ${e}`);
@@ -313,7 +316,11 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
         ? "application/javascript; charset=utf-8"
         : "text/plain";
       return new Response(content, {
-        headers: { "Content-Type": contentType },
+        headers: {
+          "Content-Type": contentType,
+          "Cache-Control": "no-store, max-age=0",
+          "X-Content-Type-Options": "nosniff",
+        },
       });
     } catch (e) {
       warn("HTTP", `无法加载静态资源 ${pathname}: ${e}`);
@@ -842,6 +849,8 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
           providers: { ...current.providers },
           system: { ...current.system },
           keyPools: current.keyPools || {},
+          promptOptimizer: current.promptOptimizer,
+          hfModelMap: current.hfModelMap,
           storage: current.storage || {},
         };
 
@@ -912,7 +921,7 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
         }
 
         if (changed) {
-          info("Config", `Runtime config updated: ${JSON.stringify(nextConfig.providers)}`);
+          info("Config", `Runtime config updated. System: ${JSON.stringify(nextConfig.system)}, Providers: ${JSON.stringify(nextConfig.providers)}, Storage: ${JSON.stringify(nextConfig.storage)}`);
           await replaceRuntimeConfig(nextConfig);
           return new Response(JSON.stringify({ ok: true, runtimeConfig: getRuntimeConfig() }), {
             headers: { "Content-Type": "application/json" },
@@ -1004,7 +1013,6 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
     case "/api/config/prompt-optimizer":
       if (method === "GET") {
         const config = Config.getPromptOptimizerConfig();
-        console.log("[API] GET /api/config/prompt-optimizer", config);
         // 直接返回配置，不再脱敏 API Key，以便前端明文显示
         return new Response(JSON.stringify(config || {}), {
           headers: { "Content-Type": "application/json" },
@@ -1083,7 +1091,7 @@ async function routeRequest(req: Request, ctx: RequestContext): Promise<Response
           // Debug logs to verify inputs
           console.log("[API] fetch-models request:", {
             baseUrl: body.baseUrl,
-            apiKey: body.apiKey ? (body.apiKey.substring(0, 8) + "...") : "empty",
+            apiKey: body.apiKey ? "present" : "empty",
           });
 
           if (!isRecord(body) || typeof body.baseUrl !== "string") {

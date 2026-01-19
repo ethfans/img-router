@@ -783,13 +783,61 @@ class ConfigManager {
       providers[name] = next;
     }
 
+    let promptOptimizer: PromptOptimizerConfig | undefined;
+    if (config.promptOptimizer && typeof config.promptOptimizer === "object") {
+      const po = config.promptOptimizer as unknown as Record<string, unknown>;
+      promptOptimizer = {
+        baseUrl: typeof po.baseUrl === "string" ? po.baseUrl : "",
+        apiKey: typeof po.apiKey === "string" ? po.apiKey : "",
+        model: typeof po.model === "string" ? po.model : "",
+        enableTranslate: typeof po.enableTranslate === "boolean" ? po.enableTranslate : undefined,
+        translatePrompt: typeof po.translatePrompt === "string" ? po.translatePrompt : undefined,
+        enableExpand: typeof po.enableExpand === "boolean" ? po.enableExpand : undefined,
+        expandPrompt: typeof po.expandPrompt === "string" ? po.expandPrompt : undefined,
+      };
+    } else if ("promptOptimizer" in (config as unknown as Record<string, unknown>)) {
+      changed = true;
+    }
+
+    let storage: RuntimeConfig["storage"] | undefined;
+    if (config.storage && typeof config.storage === "object") {
+      const s = config.storage as Record<string, unknown>;
+      const s3Raw = s.s3;
+      if (s3Raw && typeof s3Raw === "object") {
+        const s3 = s3Raw as Record<string, unknown>;
+        if (
+          typeof s3.endpoint === "string" &&
+          typeof s3.bucket === "string" &&
+          typeof s3.accessKey === "string" &&
+          typeof s3.secretKey === "string"
+        ) {
+          storage = {
+            s3: {
+              endpoint: s3.endpoint,
+              bucket: s3.bucket,
+              accessKey: s3.accessKey,
+              secretKey: s3.secretKey,
+              region: typeof s3.region === "string" ? s3.region : undefined,
+              publicUrl: typeof s3.publicUrl === "string" ? s3.publicUrl : undefined,
+            },
+          };
+        } else {
+          changed = true;
+        }
+      }
+    } else if ("storage" in (config as unknown as Record<string, unknown>)) {
+      changed = true;
+    }
+
     return {
       changed,
       config: {
         system: config.system || {},
         providers,
         keyPools: config.keyPools || {},
+        promptOptimizer,
         hfModelMap: config.hfModelMap,
+        storage,
       },
     };
   }
@@ -809,7 +857,9 @@ class ConfigManager {
           system: loaded.system || {},
           providers: loaded.providers || {},
           keyPools: loaded.keyPools || {},
+          promptOptimizer: loaded.promptOptimizer,
           hfModelMap: loaded.hfModelMap,
+          storage: loaded.storage,
         };
       }
 
@@ -820,7 +870,9 @@ class ConfigManager {
           system: loaded.system || {},
           providers: loaded.providers || {},
           keyPools: loaded.keyPools || {},
+          promptOptimizer: loaded.promptOptimizer,
           hfModelMap: loaded.hfModelMap,
+          storage: loaded.storage,
         };
       }
     } catch (e) {
@@ -830,6 +882,9 @@ class ConfigManager {
       system: {},
       providers: {},
       keyPools: {},
+      promptOptimizer: undefined,
+      hfModelMap: undefined,
+      storage: undefined,
     };
   }
 
