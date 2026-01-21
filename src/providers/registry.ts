@@ -250,6 +250,55 @@ class ProviderRegistry {
   }
 
   /**
+   * 解析模型映射 ID，将自定义 ID 映射到实际模型名称
+   *
+   * 功能：
+   * 1. 检查所有已启用 Provider 的 modelMap 配置
+   * 2. 如果找到匹配的映射 ID，返回对应的 Provider 和实际模型名称
+   * 3. 如果没有找到映射，返回 null（表示使用原始模型 ID）
+   *
+   * @param {string} modelId - 客户端传入的模型 ID（可能是映射 ID 或实际模型名）
+   * @param {"text" | "edit" | "blend"} task - 任务类型
+   * @returns {{ provider: IProvider; actualModel: string } | null} 解析结果或 null
+   */
+  async resolveModelMapping(
+    modelId: string,
+    task: "text" | "edit" | "blend"
+  ): Promise<{ provider: IProvider; actualModel: string } | null> {
+    if (!modelId || modelId === "auto" || modelId === "default") {
+      return null;
+    }
+
+    // 导入配置管理器以获取任务默认配置
+    const { getProviderTaskDefaults } = await import("../config/manager.ts");
+
+    // 遍历所有已启用的 Provider
+    for (const reg of this.registrations.values()) {
+      if (!reg.enabled) continue;
+
+      const provider = reg.instance;
+      const defaults = getProviderTaskDefaults(provider.name, task);
+
+      // 检查 modelMap 是否匹配
+      if (defaults.modelMap) {
+        const mappedIds = defaults.modelMap.split(/[,，]/).map((s) => s.trim());
+        if (mappedIds.includes(modelId)) {
+          // 找到匹配的映射！
+          // 返回实际模型名称（优先使用配置的 model，否则使用 Provider 默认模型）
+          const actualModel = defaults.model || provider.config.defaultModel;
+          if (actualModel) {
+            info(MODULE, `模型映射: ${modelId} -> ${actualModel} (Provider: ${provider.name})`);
+            return { provider, actualModel };
+          }
+        }
+      }
+    }
+
+    // 没有找到映射
+    return null;
+  }
+
+  /**
    * 根据能力需求过滤 Provider
    *
    * @param {Partial<ProviderCapabilities>} filter - 能力过滤条件

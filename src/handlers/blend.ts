@@ -152,7 +152,27 @@ export async function handleImagesBlend(req: Request): Promise<Response> {
         );
       }
 
-      provider = providerRegistry.getProviderByModel(requestBody.model);
+      // 尝试解析模型映射（按优先级尝试所有任务类型）
+      let mappingResult = await providerRegistry.resolveModelMapping(requestBody.model, "blend");
+      
+      if (!mappingResult) {
+        mappingResult = await providerRegistry.resolveModelMapping(requestBody.model, "text");
+      }
+      
+      if (!mappingResult) {
+        mappingResult = await providerRegistry.resolveModelMapping(requestBody.model, "edit");
+      }
+      
+      if (mappingResult) {
+        // 找到了映射，使用映射的 Provider 和实际模型名
+        provider = mappingResult.provider;
+        requestBody.model = mappingResult.actualModel; // 更新为实际模型名
+        info("HTTP", `模型映射: ${requestBody.model} -> ${mappingResult.actualModel} (Provider: ${provider.name})`);
+      } else {
+        // 没有找到映射，尝试直接匹配模型名
+        provider = providerRegistry.getProviderByModel(requestBody.model);
+      }
+
       if (!provider) {
         error("HTTP", `后端模式下请求了不支持的模型: ${requestBody.model}`);
         logRequestEnd(requestId, req.method, url.pathname, 400, 0, "unsupported model");

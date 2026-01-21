@@ -137,7 +137,9 @@ export async function handleImagesEdits(req: Request): Promise<Response> {
       });
     }
 
-    // 获取启用的 Provider（取第一个启用的）
+    // 注意：此时还未解析请求体，无法获取 model 参数
+    // 需要先解析请求获取 model，然后再进行路由
+    // 暂时先获取第一个启用的 Provider 作为默认值
     const runtimeConfig = getRuntimeConfig();
     const providersConfig = runtimeConfig.providers as Record<string, RuntimeProviderConfig> | undefined;
     const enabledProviders = Object.entries(providersConfig || {})
@@ -154,6 +156,7 @@ export async function handleImagesEdits(req: Request): Promise<Response> {
       );
     }
 
+    // 暂时获取默认 Provider，稍后会根据 model 参数重新路由
     const providerName = enabledProviders[0];
     provider = providerRegistry.get(providerName) || null;
 
@@ -204,7 +207,6 @@ export async function handleImagesEdits(req: Request): Promise<Response> {
     let steps: number | undefined;
     let responseFormat: "url" | "b64_json" = "url";
     const images: string[] = [];
-
     // 2. 请求解析
     if (contentType.includes("multipart/form-data")) {
       // 处理表单上传
@@ -283,6 +285,51 @@ export async function handleImagesEdits(req: Request): Promise<Response> {
         if (body?.mask) {
           info("HTTP", "mask 参数已提供，但当前实现不保证所有 Provider 支持遮罩编辑");
         }
+      }
+    }
+
+    // 2.5. 后端模式下的模型映射路由
+    if (!detectedProvider && modes.backend && model) {
+      debug("HTTP", `[${requestId}] 后端模式: 尝试根据 model 参数进行映射路由: ${model}`);
+      
+      // 尝试模型映射（按优先级尝试所有任务类型）
+      let mappingResult = await providerRegistry.resolveModelMapping(model, "edit");
+      
+      if (!mappingResult) {
+        mappingResult = await providerRegistry.resolveModelMapping(model, "text");
+      }
+      
+      if (!mappingResult) {
+        mappingResult = await providerRegistry.resolveModelMapping(model, "blend");
+      }
+      
+      if (mappingResult) {
+        provider = mappingResult.provider;
+        const originalModel = model;
+        model = mappingResult.actualModel;
+        
+        info("HTTP", `[${requestId}] 模型映射: ${originalModel} -> ${mappingResult.actualModel} (Provider: ${provider.name})`);
+        
+        // 重新获取 API Key
+        if (provider.name === "HuggingFace") {
+          actualApiKey = "";
+          debug("HTTP", `[${requestId}] HuggingFace Provider: 使用内部 Token 管理`);
+        } else {
+          const token = keyManager.getNextKey(provider.name);
+          if (!token) {
+            error("HTTP", `[${requestId}] Key 池中没有可用的 ${provider.name} Token`);
+            return new Response(
+              JSON.stringify({ error: `No available keys for ${provider.name}` }),
+              { status: 503, headers: { "Content-Type": "application/json" } },
+            );
+          }
+          actualApiKey = token;
+          debug("HTTP", `[${requestId}] 从 Key 池获取 Token: ${actualApiKey.substring(0, 10)}...`);
+        }
+        
+        info("HTTP", `[${requestId}] 后端模式: 模型映射后路由到 ${provider.name} (Images Edit)`);
+      } else {
+        debug("HTTP", `[${requestId}] 未找到模型映射，使用默认 Provider: ${provider.name}`);
       }
     }
 

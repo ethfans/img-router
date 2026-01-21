@@ -844,6 +844,11 @@ class ConfigManager {
         if (typeof v.n === "number" || v.n === null) out.n = v.n as number | null;
         if (typeof v.steps === "number" || v.steps === null) out.steps = v.steps as number | null;
         if (typeof v.weight === "number") out.weight = v.weight;
+        
+        // 处理 modelMap (模型ID映射)
+        if (typeof v.modelMap === "string") {
+          out.modelMap = v.modelMap;
+        }
 
         // 处理 promptOptimizer
         if (v.promptOptimizer && typeof v.promptOptimizer === "object") {
@@ -860,6 +865,7 @@ class ConfigManager {
           "quality",
           "n",
           "weight",
+          "modelMap",
           "promptOptimizer",
           "steps",
         ]);

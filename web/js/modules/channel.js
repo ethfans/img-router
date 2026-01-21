@@ -130,6 +130,26 @@ export async function renderChannel(container) {
   // 事件委托处理变更
   // 监听所有配置项的变动并触发自动保存
   container.addEventListener("change", (e) => {
+    // 监听渠道开关状态变化，实时更新视觉效果
+    if (e.target.dataset.field === "enabled") {
+      const isEnabled = e.target.checked;
+      
+      // 找到对应的渠道表格
+      const section = e.target.closest(".form-section");
+      const channelTable = section?.querySelector(".channel-table");
+      
+      if (channelTable) {
+        // 实时更新样式
+        if (isEnabled) {
+          channelTable.style.opacity = "1";
+          channelTable.style.pointerEvents = "auto";
+        } else {
+          channelTable.style.opacity = "0.5";
+          channelTable.style.pointerEvents = "none";
+        }
+      }
+    }
+
     // 监听豆包模型变化，动态更新尺寸列表
     if (e.target.dataset.field === "model" && e.target.dataset.provider === "Doubao") {
       updateDoubaoSizeOptions(e.target);
