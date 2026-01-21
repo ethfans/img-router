@@ -15,6 +15,7 @@ RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debia
 # 复制配置文件
 COPY deno.json .
 COPY deno.lock .
+COPY docker-compose.yml .
 
 # 复制源代码目录
 COPY src/ ./src/
